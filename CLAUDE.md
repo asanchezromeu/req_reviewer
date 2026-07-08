@@ -36,7 +36,8 @@ Backend tests:
 python -m unittest backend.tests.test_retrieval backend.tests.test_conflict_precheck \
   backend.tests.test_deterministic_review backend.tests.test_auth backend.tests.test_llm_contract \
   backend.tests.test_review_fallback backend.tests.test_search_verification \
-  backend.tests.test_summary_contract -v
+  backend.tests.test_summary_contract backend.tests.test_corpus_fewshot \
+  backend.tests.test_reference_kb backend.tests.test_reference_ingestion -v
   # ^ all stdlib+fastapi TestClient only, no live server or Ollama needed (LLM calls are mocked)
 pytest backend/tests/test_reqiq_api.py     # hits a running server; BASE_URL/REACT_APP_BACKEND_URL env, defaults to http://localhost:8000
 pytest backend/tests/test_reqiq_iter2.py
@@ -117,6 +118,15 @@ python -m unittest tests.test_req_analysis -v
   review-fallback retrofit above and the search verification step below.
 - `backend/openapi.json` is a committed snapshot of the OpenAPI schema — regenerate it with
   `python -m backend.export_openapi` whenever routes change.
+- **Corpus examples + few-shot (Phase 4 Tier 1, `SPEC.md` 2.1)**: `POST/GET/DELETE /corpus/examples`
+  (renamed from `/training/examples`, old path kept as a thin deprecated alias) is the curated
+  good/bad example corpus. `get_fewshot_prefix()` (mirrors the existing `get_tailoring_prefix(...)`
+  pattern) formats up to 3 good + 3 bad examples into a short calibration block, prepended to
+  `analyze_one` and the set-level consistency check. It's deliberately flat/uncapped-by-relevance —
+  Tier 1 is the curated corpus, not semantic retrieval (that's Tier 2, below). `retrieval.py`'s
+  `/search` and `/summary` have no DB access, so `create_requirements_router` takes one more
+  optional injected callable, `fetch_fewshot_examples`, following the same DI pattern as
+  `llm_complete`; `server.py` passes `get_fewshot_prefix` directly.
 
 **`backend/retrieval.py`** (renamed from `showcase.py` in Phase 1 — this is now "the" requirements
 store, not a demo-specific module) is self-contained: its own SQLite store, embeddings, and search
@@ -152,6 +162,23 @@ ranking, exposed via `create_requirements_router(llm_complete)`:
   candidate + its verdict for transparency, never fabricates an answer. If the verification LLM call
   itself fails, the response degrades to similarity-only matches with `unverified: true` rather than
   failing the request.
+- **Reference KB (Phase 4 Tier 2, `SPEC.md` 2.1)**: `POST /corpus/references` (`{document, title,
+  text}`) chunks (`backend/reference_kb.py`'s `chunk_reference_text` — paragraph-split, then
+  sentence-windowed for oversized paragraphs) and embeds reference material (standards excerpts,
+  glossaries) into two more tables on the *same* SQLite file as requirements —
+  `reference_chunks`/`reference_embeddings` on `RequirementStore`. Ingestion is **additive**
+  (`add_reference_chunks`), unlike requirements' full-replace `PUT` — ingesting one more standard
+  shouldn't wipe earlier ones. A second `IndexCoordinator` (`reference_indexer`, exposed on the
+  router alongside `indexer`) runs the same background-embedding machinery against the reference
+  methods; `IndexCoordinator` itself was generalized with optional `stale_fn`/`save_fn`/`count_fn`
+  constructor params to make this possible without duplicating the threading/status code.
+  `GET /corpus/references` lists chunks; `GET /corpus/references/index/status` reports indexing
+  progress separately from `/index/status` (requirements). Retrieval integration: `/search` and
+  `/summary` each rank indexed reference chunks against the query vector
+  (`reference_kb.rank_reference_chunks`, cosine-only — reference prose isn't "shall" statements, so
+  the requirement-tuned keyword/structural scoring doesn't apply) and inject the top few as a
+  labeled "REFERENCE MATERIAL" context block in the LLM call — grounding/context only, never treated
+  as an answer candidate (no verdict, doesn't affect search cardinality).
 
 **Frontend** (`frontend/src/`):
 

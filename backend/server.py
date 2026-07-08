@@ -509,6 +509,31 @@ async def get_tailoring_prefix(tailoring_prompt_id: Optional[str]) -> str:
     return f"PROJECT TAILORING CONTEXT (apply this lens to your analysis):\n{extra}\n\n"
 
 
+async def get_fewshot_prefix(max_per_label: int = 3) -> str:
+    """SPEC.md Tier 1: inject curated good/bad examples as few-shot context.
+
+    Flat and uncapped-by-relevance on purpose - Tier 1 is the curated corpus,
+    not semantic retrieval (that's Tier 2, over reference material). Empty
+    string when the corpus has nothing yet, so a fresh install is unaffected.
+    """
+    cursor = db.training_examples.find({}, {"_id": 0}).sort("created_at", -1)
+    examples = await cursor.to_list(200)
+    good = [ex for ex in examples if ex.get("label") == "good"][:max_per_label]
+    bad = [ex for ex in examples if ex.get("label") == "bad"][:max_per_label]
+    if not good and not bad:
+        return ""
+
+    lines = ["CURATED EXAMPLES (for calibration only - do not copy verbatim):"]
+    for ex in good:
+        lines.append(f'GOOD: "{ex.get("requirement_text", "")}" - {ex.get("explanation", "")}'.rstrip(" -"))
+    for ex in bad:
+        line = f'BAD: "{ex.get("requirement_text", "")}" - {ex.get("explanation", "")}'.rstrip(" -")
+        if ex.get("corrected_text"):
+            line += f' (fix: "{ex["corrected_text"]}")'
+        lines.append(line)
+    return "\n".join(lines) + "\n\n"
+
+
 async def analyze_one(
     provider: str,
     model: str,
@@ -534,7 +559,7 @@ async def analyze_one(
 
 @api.post("/review/requirement")
 async def review_requirement_endpoint(body: ReviewRequirementBody):
-    tailoring = await get_tailoring_prefix(body.tailoring_prompt_id)
+    tailoring = await get_tailoring_prefix(body.tailoring_prompt_id) + await get_fewshot_prefix()
     return await analyze_one(
         body.provider,
         body.model,
@@ -550,7 +575,7 @@ async def review_set_endpoint(body: ReviewSetBody):
     requirements = await asyncio.to_thread(requirements_store.list_requirements)
     if not requirements:
         raise HTTPException(status_code=409, detail="No requirements are stored yet")
-    tailoring = await get_tailoring_prefix(body.tailoring_prompt_id)
+    tailoring = await get_tailoring_prefix(body.tailoring_prompt_id) + await get_fewshot_prefix()
 
     # Run per-requirement LLM calls in parallel, bounded concurrency
     # to avoid hitting provider rate limits and ingress proxy timeouts.
@@ -810,9 +835,9 @@ async def generate_prompt(body: PromptGenerateBody):
     }
 
 
-# ----- Training examples -----
+# ----- Corpus examples (SPEC.md Tier 1: curated good/bad example corpus) -----
 
-@api.post("/training/examples", response_model=TrainingExample)
+@api.post("/corpus/examples", response_model=TrainingExample)
 async def create_example(body: TrainingExampleCreate):
     if body.label not in ("good", "bad"):
         raise HTTPException(status_code=400, detail="label must be 'good' or 'bad'")
@@ -821,18 +846,33 @@ async def create_example(body: TrainingExampleCreate):
     return ex
 
 
-@api.get("/training/examples")
+@api.get("/corpus/examples")
 async def list_examples():
     cursor = db.training_examples.find({}, {"_id": 0}).sort("created_at", -1)
     return await cursor.to_list(1000)
 
 
-@api.delete("/training/examples/{ex_id}")
+@api.delete("/corpus/examples/{ex_id}")
 async def delete_example(ex_id: str):
     res = await db.training_examples.delete_one({"id": ex_id})
     if res.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Not found")
     return {"deleted": True}
+
+
+@api.post("/training/examples", response_model=TrainingExample, deprecated=True)
+async def create_example_legacy(body: TrainingExampleCreate):
+    return await create_example(body)
+
+
+@api.get("/training/examples", deprecated=True)
+async def list_examples_legacy():
+    return await list_examples()
+
+
+@api.delete("/training/examples/{ex_id}", deprecated=True)
+async def delete_example_legacy(ex_id: str):
+    return await delete_example(ex_id)
 
 
 # ----- Training datasets -----
@@ -1043,7 +1083,7 @@ async def delete_job(job_id: str):
 
 # ---------- Mount ----------
 
-requirements_router = create_requirements_router(llm_complete)
+requirements_router = create_requirements_router(llm_complete, fetch_fewshot_examples=get_fewshot_prefix)
 requirements_store = requirements_router.store
 requirements_indexer = requirements_router.indexer
 

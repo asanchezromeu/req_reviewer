@@ -354,6 +354,45 @@
         "title": "PromptGenerateBody",
         "type": "object"
       },
+      "ReferenceIngestBody": {
+        "properties": {
+          "document": {
+            "title": "Document",
+            "type": "string"
+          },
+          "embedding_model": {
+            "default": "embeddinggemma",
+            "title": "Embedding Model",
+            "type": "string"
+          },
+          "ollama_url": {
+            "default": "http://localhost:11434",
+            "title": "Ollama Url",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "required": [
+          "document",
+          "text"
+        ],
+        "title": "ReferenceIngestBody",
+        "type": "object"
+      },
       "Requirement": {
         "properties": {
           "id": {
@@ -903,6 +942,176 @@
           }
         },
         "summary": "Classify Endpoint"
+      }
+    },
+    "/api/corpus/examples": {
+      "get": {
+        "deprecated": true,
+        "operationId": "list_examples_api_corpus_examples_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Examples"
+      },
+      "post": {
+        "deprecated": true,
+        "operationId": "create_example_api_corpus_examples_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TrainingExampleCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrainingExample"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Example"
+      }
+    },
+    "/api/corpus/examples/{ex_id}": {
+      "delete": {
+        "deprecated": true,
+        "operationId": "delete_example_api_corpus_examples__ex_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ex_id",
+            "required": true,
+            "schema": {
+              "title": "Ex Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Example"
+      }
+    },
+    "/api/corpus/references": {
+      "get": {
+        "deprecated": true,
+        "operationId": "list_references_api_corpus_references_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List References",
+        "tags": [
+          "requirements"
+        ]
+      },
+      "post": {
+        "deprecated": true,
+        "operationId": "ingest_reference_api_corpus_references_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReferenceIngestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ingest Reference",
+        "tags": [
+          "requirements"
+        ]
+      }
+    },
+    "/api/corpus/references/index/status": {
+      "get": {
+        "deprecated": true,
+        "operationId": "reference_index_status_api_corpus_references_index_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Reference Index Status",
+        "tags": [
+          "requirements"
+        ]
       }
     },
     "/api/distillation/jobs": {
@@ -1792,7 +2001,7 @@
     "/api/training/examples": {
       "get": {
         "deprecated": true,
-        "operationId": "list_examples_api_training_examples_get",
+        "operationId": "list_examples_legacy_api_training_examples_get",
         "responses": {
           "200": {
             "content": {
@@ -1803,11 +2012,11 @@
             "description": "Successful Response"
           }
         },
-        "summary": "List Examples"
+        "summary": "List Examples Legacy"
       },
       "post": {
         "deprecated": true,
-        "operationId": "create_example_api_training_examples_post",
+        "operationId": "create_example_legacy_api_training_examples_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -1840,13 +2049,13 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Create Example"
+        "summary": "Create Example Legacy"
       }
     },
     "/api/training/examples/{ex_id}": {
       "delete": {
         "deprecated": true,
-        "operationId": "delete_example_api_training_examples__ex_id__delete",
+        "operationId": "delete_example_legacy_api_training_examples__ex_id__delete",
         "parameters": [
           {
             "in": "path",
@@ -1878,7 +2087,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Delete Example"
+        "summary": "Delete Example Legacy"
       }
     },
     "/api/v1/": {
@@ -1982,6 +2191,200 @@
           }
         ],
         "summary": "Classify Endpoint"
+      }
+    },
+    "/api/v1/corpus/examples": {
+      "get": {
+        "operationId": "list_examples_api_v1_corpus_examples_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Examples"
+      },
+      "post": {
+        "operationId": "create_example_api_v1_corpus_examples_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TrainingExampleCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrainingExample"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Example"
+      }
+    },
+    "/api/v1/corpus/examples/{ex_id}": {
+      "delete": {
+        "operationId": "delete_example_api_v1_corpus_examples__ex_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ex_id",
+            "required": true,
+            "schema": {
+              "title": "Ex Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Example"
+      }
+    },
+    "/api/v1/corpus/references": {
+      "get": {
+        "operationId": "list_references_api_v1_corpus_references_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List References",
+        "tags": [
+          "requirements"
+        ]
+      },
+      "post": {
+        "operationId": "ingest_reference_api_v1_corpus_references_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReferenceIngestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Ingest Reference",
+        "tags": [
+          "requirements"
+        ]
+      }
+    },
+    "/api/v1/corpus/references/index/status": {
+      "get": {
+        "operationId": "reference_index_status_api_v1_corpus_references_index_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Reference Index Status",
+        "tags": [
+          "requirements"
+        ]
       }
     },
     "/api/v1/distillation/jobs": {
@@ -2974,7 +3377,8 @@
     },
     "/api/v1/training/examples": {
       "get": {
-        "operationId": "list_examples_api_v1_training_examples_get",
+        "deprecated": true,
+        "operationId": "list_examples_legacy_api_v1_training_examples_get",
         "responses": {
           "200": {
             "content": {
@@ -2990,10 +3394,11 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "List Examples"
+        "summary": "List Examples Legacy"
       },
       "post": {
-        "operationId": "create_example_api_v1_training_examples_post",
+        "deprecated": true,
+        "operationId": "create_example_legacy_api_v1_training_examples_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -3031,12 +3436,13 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Create Example"
+        "summary": "Create Example Legacy"
       }
     },
     "/api/v1/training/examples/{ex_id}": {
       "delete": {
-        "operationId": "delete_example_api_v1_training_examples__ex_id__delete",
+        "deprecated": true,
+        "operationId": "delete_example_legacy_api_v1_training_examples__ex_id__delete",
         "parameters": [
           {
             "in": "path",
@@ -3073,7 +3479,7 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "Delete Example"
+        "summary": "Delete Example Legacy"
       }
     }
   }

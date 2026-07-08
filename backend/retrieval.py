@@ -28,10 +28,12 @@ try:
     from .llm_contract import extract_json, reconcile_by_id
     from .search_prompts import SEARCH_VERIFICATION_PROMPT
     from .summary_prompts import EXECUTIVE_SUMMARY_PROMPT
+    from .reference_kb import chunk_reference_text, rank_reference_chunks
 except ImportError:
     from llm_contract import extract_json, reconcile_by_id
     from search_prompts import SEARCH_VERIFICATION_PROMPT
     from summary_prompts import EXECUTIVE_SUMMARY_PROMPT
+    from reference_kb import chunk_reference_text, rank_reference_chunks
 
 
 def utc_now() -> str:
@@ -71,6 +73,14 @@ class SummaryBody(BaseModel):
     ollama_url: str = "http://localhost:11434"
     min_similarity: float = 0.30
     summary_top_k: int = 3
+
+
+class ReferenceIngestBody(BaseModel):
+    document: str
+    title: Optional[str] = None
+    text: str
+    embedding_model: str = "embeddinggemma"
+    ollama_url: str = "http://localhost:11434"
 
 
 class RequirementStore:
@@ -114,6 +124,26 @@ class RequirementStore:
                     updated_at TEXT NOT NULL,
                     FOREIGN KEY(requirement_id)
                         REFERENCES requirements(id)
+                        ON DELETE CASCADE
+                );
+
+                CREATE TABLE IF NOT EXISTS reference_chunks (
+                    id TEXT PRIMARY KEY,
+                    document TEXT NOT NULL,
+                    title TEXT,
+                    text TEXT NOT NULL,
+                    revision INTEGER NOT NULL DEFAULT 1,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS reference_embeddings (
+                    chunk_id TEXT PRIMARY KEY,
+                    model TEXT NOT NULL,
+                    revision INTEGER NOT NULL,
+                    vector TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY(chunk_id)
+                        REFERENCES reference_chunks(id)
                         ON DELETE CASCADE
                 );
                 """
@@ -268,6 +298,121 @@ class RequirementStore:
                 FROM requirements r
                 JOIN requirement_embeddings e ON e.requirement_id = r.id
                 WHERE e.model = ? AND e.revision = r.revision
+                """,
+                (model,),
+            ).fetchone()[0]
+        return {"total": total, "indexed": indexed, "pending": total - indexed}
+
+    def add_reference_chunks(
+        self, document: str, title: Optional[str], chunks: List[str]
+    ) -> List[Dict[str, Any]]:
+        """Append chunks for one ingested document (additive - does not remove existing chunks)."""
+        now = utc_now()
+        with self.connect() as connection:
+            existing_count = connection.execute(
+                "SELECT COUNT(*) FROM reference_chunks WHERE document = ?", (document,)
+            ).fetchone()[0]
+            for offset, text in enumerate(chunks):
+                chunk_id = f"{document}#{existing_count + offset + 1}"
+                connection.execute(
+                    """
+                    INSERT INTO reference_chunks(id, document, title, text, revision, updated_at)
+                    VALUES (?, ?, ?, ?, 1, ?)
+                    ON CONFLICT(id) DO UPDATE SET
+                        title = excluded.title,
+                        text = excluded.text,
+                        revision = reference_chunks.revision + 1,
+                        updated_at = excluded.updated_at
+                    """,
+                    (chunk_id, document, title, text, now),
+                )
+        return self.list_reference_chunks()
+
+    def list_reference_chunks(self) -> List[Dict[str, Any]]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT id, document, title, text, revision, updated_at
+                FROM reference_chunks
+                ORDER BY document, id COLLATE NOCASE
+                """
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def stale_reference_chunks(self, model: str) -> List[Dict[str, Any]]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT c.id, c.document, c.title, c.text, c.revision
+                FROM reference_chunks c
+                LEFT JOIN reference_embeddings e ON e.chunk_id = c.id
+                WHERE e.chunk_id IS NULL
+                   OR e.model != ?
+                   OR e.revision != c.revision
+                ORDER BY c.id COLLATE NOCASE
+                """,
+                (model,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def save_reference_embeddings(
+        self, model: str, chunks: List[Dict[str, Any]], vectors: List[List[float]]
+    ) -> None:
+        if len(chunks) != len(vectors):
+            raise ValueError("Ollama returned an unexpected number of embeddings")
+        now = utc_now()
+        with self.connect() as connection:
+            for chunk, vector in zip(chunks, vectors):
+                current = connection.execute(
+                    "SELECT revision FROM reference_chunks WHERE id = ?",
+                    (chunk["id"],),
+                ).fetchone()
+                if current is None or current["revision"] != chunk["revision"]:
+                    continue
+                connection.execute(
+                    """
+                    INSERT INTO reference_embeddings(chunk_id, model, revision, vector, updated_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(chunk_id) DO UPDATE SET
+                        model = excluded.model,
+                        revision = excluded.revision,
+                        vector = excluded.vector,
+                        updated_at = excluded.updated_at
+                    """,
+                    (chunk["id"], model, chunk["revision"], json.dumps(vector), now),
+                )
+
+    def indexed_reference_chunks(self, model: str) -> List[Dict[str, Any]]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT c.id, c.document, c.title, c.text, e.vector
+                FROM reference_chunks c
+                JOIN reference_embeddings e ON e.chunk_id = c.id
+                WHERE e.model = ? AND e.revision = c.revision
+                """,
+                (model,),
+            ).fetchall()
+        return [
+            {
+                "id": row["id"],
+                "document": row["document"],
+                "title": row["title"],
+                "text": row["text"],
+                "vector": json.loads(row["vector"]),
+            }
+            for row in rows
+        ]
+
+    def reference_counts(self, model: str) -> Dict[str, int]:
+        with self.connect() as connection:
+            total = connection.execute("SELECT COUNT(*) FROM reference_chunks").fetchone()[0]
+            indexed = connection.execute(
+                """
+                SELECT COUNT(*)
+                FROM reference_chunks c
+                JOIN reference_embeddings e ON e.chunk_id = c.id
+                WHERE e.model = ? AND e.revision = c.revision
                 """,
                 (model,),
             ).fetchone()[0]
@@ -608,13 +753,29 @@ def broad_summary_sources(
 
 
 class IndexCoordinator:
+    """Background embedding indexer, generalized over which store methods it drives.
+
+    Defaults to the requirement-embedding methods; pass `stale_fn`/`save_fn`/
+    `count_fn` bound to the reference-chunk methods to run a second, independent
+    coordinator over reference material (SPEC.md Tier 2) without duplicating
+    the threading/status logic.
+    """
+
     def __init__(
         self,
         store: RequirementStore,
         embedder: Callable[[str, str, List[str]], List[List[float]]] = ollama_embed,
+        stale_fn: Optional[Callable[[str], List[Dict[str, Any]]]] = None,
+        save_fn: Optional[Callable[[str, List[Dict[str, Any]], List[List[float]]], None]] = None,
+        count_fn: Optional[Callable[[str], Dict[str, int]]] = None,
+        thread_name: str = "requirement-indexer",
     ):
         self.store = store
         self.embedder = embedder
+        self.stale_fn = stale_fn or store.stale_requirements
+        self.save_fn = save_fn or store.save_embeddings
+        self.count_fn = count_fn or store.counts
+        self.thread_name = thread_name
         self.lock = threading.Lock()
         self.running = False
         self.rerun = False
@@ -630,7 +791,7 @@ class IndexCoordinator:
             if self.running:
                 return
             self.running = True
-            threading.Thread(target=self._run, daemon=True, name="requirement-indexer").start()
+            threading.Thread(target=self._run, daemon=True, name=self.thread_name).start()
 
     def _run(self) -> None:
         try:
@@ -639,16 +800,16 @@ class IndexCoordinator:
                     self.rerun = False
                     model = self.model
                     ollama_url = self.ollama_url
-                stale = self.store.stale_requirements(model)
+                stale = self.stale_fn(model)
                 if stale:
                     vectors = self.embedder(
                         ollama_url,
                         model,
                         [item["text"] for item in stale],
                     )
-                    self.store.save_embeddings(model, stale, vectors)
+                    self.save_fn(model, stale, vectors)
                 with self.lock:
-                    if not self.rerun and not self.store.stale_requirements(self.model):
+                    if not self.rerun and not self.stale_fn(self.model):
                         self.error = None
                         self.running = False
                         return
@@ -662,7 +823,7 @@ class IndexCoordinator:
             model = self.model
             running = self.running
             error = self.error
-        counts = self.store.counts(model)
+        counts = self.count_fn(model)
         state = "error" if error else ("indexing" if running else "ready")
         if counts["total"] == 0:
             state = "empty"
@@ -852,7 +1013,12 @@ def ollama_summary(
     question: str,
     sources: List[Dict[str, Any]],
     timeout: int,
+    fewshot_prefix: str = "",
+    reference_context: str = "",
 ) -> str:
+    user_content = f"Question: {question}\n\nRelevant requirements:\n{build_summary_context(sources)}"
+    if reference_context:
+        user_content += f"\n\nREFERENCE MATERIAL (context only, not a requirement):\n{reference_context}"
     response = requests.post(
         f"{url.rstrip('/')}/api/chat",
         json={
@@ -868,14 +1034,11 @@ def ollama_summary(
             "messages": [
                 {
                     "role": "system",
-                    "content": EXECUTIVE_SUMMARY_PROMPT,
+                    "content": fewshot_prefix + EXECUTIVE_SUMMARY_PROMPT,
                 },
                 {
                     "role": "user",
-                    "content": (
-                        f"Question: {question}\n\n"
-                        f"Relevant requirements:\n{build_summary_context(sources)}"
-                    ),
+                    "content": user_content,
                 },
             ],
         },
@@ -960,6 +1123,8 @@ async def verify_candidates(
     ollama_url: str,
     query: str,
     candidates: List[Dict[str, Any]],
+    fewshot_prefix: str = "",
+    reference_context: str = "",
 ) -> Tuple[List[Dict[str, Any]], bool]:
     """Judge each candidate against the question (SPEC.md 2.2: verification-reasoning step).
 
@@ -972,9 +1137,12 @@ async def verify_candidates(
     candidate_ids = [item["id"] for item in candidates]
     listing = "\n".join(f"[{item['id']}] {item['text']}" for item in candidates)
     user_message = f"Question: {query}\n\nCandidates:\n{listing}"
+    if reference_context:
+        user_message += f"\n\nREFERENCE MATERIAL (context only, not candidates):\n{reference_context}"
+    system_message = fewshot_prefix + SEARCH_VERIFICATION_PROMPT
 
     try:
-        raw = await llm_complete(provider, model, SEARCH_VERIFICATION_PROMPT, user_message, ollama_url)
+        raw = await llm_complete(provider, model, system_message, user_message, ollama_url)
     except Exception:
         return [], True
 
@@ -990,16 +1158,38 @@ async def verify_candidates(
     return reconciled, False
 
 
+async def _no_fewshot_examples() -> str:
+    return ""
+
+
 def create_requirements_router(
     llm_complete: Callable[..., Awaitable[str]],
     database_path: Optional[Path] = None,
+    fetch_fewshot_examples: Callable[[], Awaitable[str]] = _no_fewshot_examples,
 ) -> APIRouter:
     store = RequirementStore(
         database_path
         or Path(os.environ.get("REQUIREMENTS_DB_PATH", Path(__file__).parent / "data" / "requirements.db"))
     )
     indexer = IndexCoordinator(store)
+    reference_indexer = IndexCoordinator(
+        store,
+        stale_fn=store.stale_reference_chunks,
+        save_fn=store.save_reference_embeddings,
+        count_fn=store.reference_counts,
+        thread_name="reference-indexer",
+    )
     router = APIRouter(tags=["requirements"])
+
+    async def build_reference_context(embedding_model: str, ollama_url: str, query_vector: List[float]) -> str:
+        indexed = await asyncio.to_thread(store.indexed_reference_chunks, embedding_model)
+        if not indexed:
+            return ""
+        ranked = rank_reference_chunks(indexed, query_vector, min_similarity=0.30)
+        top = ranked[:3]
+        if not top:
+            return ""
+        return "\n".join(f"[{item['document']}] {compact_text(item['text'], 300)}" for item in top)
 
     @router.get("/requirements")
     async def list_requirements():
@@ -1042,9 +1232,33 @@ def create_requirements_router(
         indexer.schedule(body.embedding_model, body.ollama_url)
         return await asyncio.to_thread(indexer.status)
 
+    @router.post("/corpus/references")
+    async def ingest_reference(body: ReferenceIngestBody):
+        chunks = chunk_reference_text(body.text)
+        if not chunks:
+            raise HTTPException(status_code=400, detail="No content to ingest after chunking")
+        await asyncio.to_thread(store.add_reference_chunks, body.document, body.title, chunks)
+        reference_indexer.schedule(body.embedding_model, body.ollama_url)
+        return {
+            "document": body.document,
+            "chunks_added": len(chunks),
+            "index": await asyncio.to_thread(reference_indexer.status),
+        }
+
+    @router.get("/corpus/references")
+    async def list_references():
+        return {
+            "chunks": await asyncio.to_thread(store.list_reference_chunks),
+            "index": await asyncio.to_thread(reference_indexer.status),
+        }
+
+    @router.get("/corpus/references/index/status")
+    async def reference_index_status():
+        return await asyncio.to_thread(reference_indexer.status)
+
     @router.post("/search")
     async def search(body: SearchBody):
-        _, _, _, ranking = await _embed_query(
+        _, _, query_vector, ranking = await _embed_query(
             store, indexer, body.query, body.embedding_model, body.ollama_url, body.min_similarity
         )
         matches = ranking["matches"]
@@ -1064,8 +1278,17 @@ def create_requirements_router(
                 "best_similarity": ranking["best_similarity"],
             }
 
+        fewshot_prefix = await fetch_fewshot_examples()
+        reference_context = await build_reference_context(body.embedding_model, body.ollama_url, query_vector)
         verdicts, unverified = await verify_candidates(
-            llm_complete, body.provider, body.llm_model, body.ollama_url, body.query, matches
+            llm_complete,
+            body.provider,
+            body.llm_model,
+            body.ollama_url,
+            body.query,
+            matches,
+            fewshot_prefix,
+            reference_context,
         )
 
         if unverified:
@@ -1131,6 +1354,8 @@ def create_requirements_router(
         degraded_reason = None
         if enable_llm_summary:
             summary_timeout = int(os.environ.get("SUMMARY_TIMEOUT", "12"))
+            fewshot_prefix = await fetch_fewshot_examples()
+            reference_context = await build_reference_context(body.embedding_model, body.ollama_url, query_vector)
             try:
                 answer = await asyncio.to_thread(
                     ollama_summary,
@@ -1139,6 +1364,8 @@ def create_requirements_router(
                     query,
                     summary_sources,
                     summary_timeout,
+                    fewshot_prefix,
+                    reference_context,
                 )
                 violation = summary_violates_contract(answer, summary_sources)
                 if violation:
@@ -1172,4 +1399,5 @@ def create_requirements_router(
 
     router.store = store
     router.indexer = indexer
+    router.reference_indexer = reference_indexer
     return router

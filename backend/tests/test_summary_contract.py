@@ -102,7 +102,7 @@ class SummaryRouteTests(unittest.TestCase):
             )
 
     def test_compliant_answer_is_used_as_is(self):
-        def fake_ollama_summary(url, model, question, sources, timeout):
+        def fake_ollama_summary(url, model, question, sources, timeout, fewshot_prefix="", reference_context=""):
             return (
                 "Diagnostics must complete within 200 ms under normal load, and authentication "
                 "failures are logged for audit purposes.\nSources: REQ-001, REQ-002"
@@ -117,7 +117,7 @@ class SummaryRouteTests(unittest.TestCase):
         self.assertEqual(set(body["source_ids"]), {"REQ-001", "REQ-002"})
 
     def test_verbatim_answer_degrades_to_fallback(self):
-        def fake_ollama_summary(url, model, question, sources, timeout):
+        def fake_ollama_summary(url, model, question, sources, timeout, fewshot_prefix="", reference_context=""):
             return "The zone controller shall respond to a diagnostic request within 200 ms under nominal load."
 
         response = self._summarize(fake_ollama_summary)
@@ -128,7 +128,7 @@ class SummaryRouteTests(unittest.TestCase):
         self.assertEqual(set(body["source_ids"]), {"REQ-001", "REQ-002"})
 
     def test_ollama_down_degrades_gracefully(self):
-        def fake_ollama_summary(url, model, question, sources, timeout):
+        def fake_ollama_summary(url, model, question, sources, timeout, fewshot_prefix="", reference_context=""):
             raise ConnectionError("Ollama is not reachable")
 
         response = self._summarize(fake_ollama_summary)
