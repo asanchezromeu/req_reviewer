@@ -27,9 +27,11 @@ from pydantic import BaseModel, Field
 try:
     from .llm_contract import extract_json, reconcile_by_id
     from .search_prompts import SEARCH_VERIFICATION_PROMPT
+    from .summary_prompts import EXECUTIVE_SUMMARY_PROMPT
 except ImportError:
     from llm_contract import extract_json, reconcile_by_id
     from search_prompts import SEARCH_VERIFICATION_PROMPT
+    from summary_prompts import EXECUTIVE_SUMMARY_PROMPT
 
 
 def utc_now() -> str:
@@ -866,11 +868,7 @@ def ollama_summary(
             "messages": [
                 {
                     "role": "system",
-                    "content": (
-                        "You answer project-management questions using only cited requirements. "
-                        "Use at most four concise sentences. Cite requirement IDs inline. "
-                        "If the cited requirements do not provide one unique answer, say so."
-                    ),
+                    "content": EXECUTIVE_SUMMARY_PROMPT,
                 },
                 {
                     "role": "user",
@@ -885,6 +883,30 @@ def ollama_summary(
     )
     response.raise_for_status()
     return str((response.json().get("message") or {}).get("content") or "").strip()
+
+
+_SENTENCE_PATTERN = re.compile(r"[^.!?]+[.!?]*")
+_WHITESPACE_PATTERN = re.compile(r"\s+")
+
+
+def _normalize_for_comparison(text: str) -> str:
+    return _WHITESPACE_PATTERN.sub(" ", text.strip().lower())
+
+
+def summary_violates_contract(answer: str, sources: List[Dict[str, Any]]) -> Optional[str]:
+    """Check an LLM-generated executive summary against SPEC.md 2.3's output contract.
+
+    The only hard-gated rule is "no verbatim requirement sentences" (quantitative
+    facts like numbers/units are fine to restate). Returns a violation reason, or
+    None if the answer passes.
+    """
+    normalized_answer = _normalize_for_comparison(answer)
+    for source in sources:
+        for sentence in _SENTENCE_PATTERN.findall(source.get("text", "")):
+            normalized_sentence = _normalize_for_comparison(sentence)
+            if len(normalized_sentence) >= 30 and normalized_sentence in normalized_answer:
+                return f"verbatim quote from {source.get('id')}"
+    return None
 
 
 async def _embed_query(
@@ -1097,6 +1119,7 @@ def create_requirements_router(
                 "best_similarity": ranking["best_similarity"],
                 "ambiguous": True,
                 "degraded": True,
+                "degraded_reason": "no relevant requirements found",
             }
 
         enable_llm_summary = os.environ.get("ENABLE_LLM_SUMMARY", "").lower() in (
@@ -1105,6 +1128,7 @@ def create_requirements_router(
             "yes",
             "on",
         )
+        degraded_reason = None
         if enable_llm_summary:
             summary_timeout = int(os.environ.get("SUMMARY_TIMEOUT", "12"))
             try:
@@ -1116,13 +1140,19 @@ def create_requirements_router(
                     summary_sources,
                     summary_timeout,
                 )
-                degraded = False
+                violation = summary_violates_contract(answer, summary_sources)
+                if violation:
+                    degraded_reason = violation
+                    answer = fallback_summary(query, summary_sources, violation)
+                degraded = bool(violation)
             except Exception as exc:
+                degraded_reason = str(exc)
                 answer = fallback_summary(query, summary_sources, str(exc))
                 degraded = True
         else:
             answer = fallback_summary(query, summary_sources)
             degraded = True
+            degraded_reason = "LLM summary disabled (ENABLE_LLM_SUMMARY not set)"
 
         sources = [
             {key: item[key] for key in ("id", "text", "source", "distance", "similarity", "score", "breakdown")}
@@ -1137,6 +1167,7 @@ def create_requirements_router(
             "best_similarity": ranking["best_similarity"],
             "ambiguous": len(summary_sources) != 1,
             "degraded": degraded,
+            "degraded_reason": degraded_reason,
         }
 
     router.store = store

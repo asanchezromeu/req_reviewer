@@ -35,7 +35,8 @@ Backend tests:
 ```bash
 python -m unittest backend.tests.test_retrieval backend.tests.test_conflict_precheck \
   backend.tests.test_deterministic_review backend.tests.test_auth backend.tests.test_llm_contract \
-  backend.tests.test_review_fallback backend.tests.test_search_verification -v
+  backend.tests.test_review_fallback backend.tests.test_search_verification \
+  backend.tests.test_summary_contract -v
   # ^ all stdlib+fastapi TestClient only, no live server or Ollama needed (LLM calls are mocked)
 pytest backend/tests/test_reqiq_api.py     # hits a running server; BASE_URL/REACT_APP_BACKEND_URL env, defaults to http://localhost:8000
 pytest backend/tests/test_reqiq_iter2.py
@@ -129,9 +130,16 @@ ranking, exposed via `create_requirements_router(llm_complete)`:
 - Retrieval blends multiple signals — cosine similarity on embeddings plus `keyword_score`,
   `phrase_score`, `structural_score`, and `parameter_penalty` — in `ranked_matches`/`score_requirement`.
 - `POST /summary` (`broad_summary_sources` for broad queries, otherwise the top-N via
-  `select_summary_sources`) retrieves several requirements and asks the local LLM (`ollama_summary`)
-  for an executive summary, with `fallback_summary`/`summarize_quantitative_answer` as non-LLM
-  fallbacks (`degraded: true` in the response when the LLM path wasn't used).
+  `select_summary_sources`) retrieves several requirements and asks the local LLM (`ollama_summary`,
+  system prompt in `backend/summary_prompts.py`) for an executive summary, with `fallback_summary`/
+  `summarize_quantitative_answer` as non-LLM fallbacks (`degraded: true`, `degraded_reason` set, when
+  the LLM path wasn't used, failed, or was used but rejected). Phase 3 (`SPEC.md` 2.3) added contract
+  enforcement: `summary_violates_contract` checks the LLM's prose for verbatim-quoted requirement
+  sentences (quantitative facts like numbers/units may be restated; this is deliberately the only
+  hard-gated rule — the prompt also asks for a closing `Sources: <ids>` line and honest "not
+  specified" answers, but those aren't gated the same way, since the structured `source_ids` field
+  already guarantees traceability regardless of the prose). A violation discards the LLM's answer and
+  falls back to the same deterministic path used when the LLM is unreachable.
 - `POST /search` (Phase 2: `SPEC.md` 2.2 "advanced search") is retrieve-then-verify, not just
   ranking: `ranked_matches` produces candidates, then `verify_candidates` (using
   `backend/search_prompts.py`'s `SEARCH_VERIFICATION_PROMPT` via `llm_complete`, provider-agnostic)
