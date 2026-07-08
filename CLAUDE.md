@@ -37,8 +37,13 @@ python -m unittest backend.tests.test_retrieval backend.tests.test_conflict_prec
   backend.tests.test_deterministic_review backend.tests.test_auth backend.tests.test_llm_contract \
   backend.tests.test_review_fallback backend.tests.test_search_verification \
   backend.tests.test_summary_contract backend.tests.test_corpus_fewshot \
-  backend.tests.test_reference_kb backend.tests.test_reference_ingestion -v
-  # ^ all stdlib+fastapi TestClient only, no live server or Ollama needed (LLM calls are mocked)
+  backend.tests.test_reference_kb backend.tests.test_reference_ingestion \
+  backend.tests.test_model_registry backend.tests.test_dataset_export \
+  backend.tests.test_model_registry_routes backend.tests.test_model_evaluate -v
+  # ^ all stdlib+fastapi TestClient only, no live server or Ollama needed (LLM calls are mocked).
+  # Note: test_search_verification.py / test_reference_ingestion.py have a known intermittent
+  # Windows-only PermissionError on tempdir cleanup (a background IndexCoordinator thread racing
+  # SQLite file handle release) - rerun if you hit it, it's a teardown flake, not a test failure.
 pytest backend/tests/test_reqiq_api.py     # hits a running server; BASE_URL/REACT_APP_BACKEND_URL env, defaults to http://localhost:8000
 pytest backend/tests/test_reqiq_iter2.py
 python -m backend.export_openapi           # regenerate backend/openapi.json after any route change
@@ -127,6 +132,28 @@ python -m unittest tests.test_req_analysis -v
   `/search` and `/summary` have no DB access, so `create_requirements_router` takes one more
   optional injected callable, `fetch_fewshot_examples`, following the same DI pattern as
   `llm_complete`; `server.py` passes `get_fewshot_prefix` directly.
+- **Training tier 3 scaffolding (Phase 5, `SPEC.md` 2.1)** — `backend/model_registry.py` holds the
+  pure helpers; `server.py` wires storage. The engine does not fine-tune; it produces the export and
+  evaluates whatever model comes back from an external LoRA run:
+  - `POST /datasets/export` turns the `/corpus/examples` corpus into a JSONL fine-tuning dataset
+    (`model_registry.build_training_row`), reusing `analyze_one`'s exact user-message shape so the
+    export matches the real review call's I/O. Target scores/fixes are **not invented** — they come
+    from running `deterministic_review.review_requirement` on the corrected (or original) text, the
+    same heuristics already used as the review fallback/oracle elsewhere.
+  - `GET/PUT /models/registry[/{feature}]` — "which model is active per feature"
+    (`review`/`search`/`summary`/`classify`/`ask`), backed by a new `db.model_registry` collection.
+    **Deliberately not wired as an implicit default** into `ReviewRequirementBody` etc. — every
+    existing endpoint still requires explicit `provider`/`model`; the registry is metadata other
+    tools (and `/models/evaluate` below) read, not a fallback-resolution mechanism. Revisit if/when
+    the host-tool integration wants implicit defaults.
+  - `POST /models/evaluate` runs a candidate model against the registry's active ("review" only,
+    for now — other features don't have a held-out question→answer format yet) model over the
+    corpus, via `analyze_one`, **without** few-shot injection (isolates model capability from
+    corpus-augmentation effects). Reports average score, accuracy
+    (`model_registry.score_matches_expectation` against each example's good/bad label), and
+    `degraded_count` — how often each model's result fell back to the deterministic scorer via
+    `analyze_one`'s existing `fallback` marker, so a misleadingly-similar comparison caused by both
+    models hitting that fallback is visible rather than hidden.
 
 **`backend/retrieval.py`** (renamed from `showcase.py` in Phase 1 — this is now "the" requirements
 store, not a demo-specific module) is self-contained: its own SQLite store, embeddings, and search

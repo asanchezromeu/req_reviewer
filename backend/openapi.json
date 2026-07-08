@@ -272,6 +272,54 @@
         "title": "DistillationStartBody",
         "type": "object"
       },
+      "EvaluateBody": {
+        "properties": {
+          "candidate_model": {
+            "title": "Candidate Model",
+            "type": "string"
+          },
+          "candidate_provider": {
+            "title": "Candidate Provider",
+            "type": "string"
+          },
+          "example_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Example Ids"
+          },
+          "feature": {
+            "default": "review",
+            "title": "Feature",
+            "type": "string"
+          },
+          "tailoring_prompt_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tailoring Prompt Id"
+          }
+        },
+        "required": [
+          "candidate_provider",
+          "candidate_model"
+        ],
+        "title": "EvaluateBody",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -391,6 +439,24 @@
           "text"
         ],
         "title": "ReferenceIngestBody",
+        "type": "object"
+      },
+      "RegistryUpdateBody": {
+        "properties": {
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "model"
+        ],
+        "title": "RegistryUpdateBody",
         "type": "object"
       },
       "Requirement": {
@@ -1114,6 +1180,51 @@
         ]
       }
     },
+    "/api/datasets/export": {
+      "post": {
+        "deprecated": true,
+        "operationId": "export_dataset_api_datasets_export_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "label",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Label"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Export Dataset"
+      }
+    },
     "/api/distillation/jobs": {
       "get": {
         "deprecated": true,
@@ -1364,6 +1475,108 @@
           }
         },
         "summary": "Get Models"
+      }
+    },
+    "/api/models/evaluate": {
+      "post": {
+        "deprecated": true,
+        "operationId": "evaluate_model_api_models_evaluate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EvaluateBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Evaluate Model"
+      }
+    },
+    "/api/models/registry": {
+      "get": {
+        "deprecated": true,
+        "operationId": "get_model_registry_api_models_registry_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Model Registry"
+      }
+    },
+    "/api/models/registry/{feature}": {
+      "put": {
+        "deprecated": true,
+        "operationId": "set_model_registry_entry_api_models_registry__feature__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "feature",
+            "required": true,
+            "schema": {
+              "title": "Feature",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegistryUpdateBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Model Registry Entry"
       }
     },
     "/api/ollama/models": {
@@ -2387,6 +2600,55 @@
         ]
       }
     },
+    "/api/v1/datasets/export": {
+      "post": {
+        "operationId": "export_dataset_api_v1_datasets_export_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "label",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Label"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Export Dataset"
+      }
+    },
     "/api/v1/distillation/jobs": {
       "get": {
         "operationId": "list_jobs_api_v1_distillation_jobs_get",
@@ -2673,6 +2935,120 @@
           }
         ],
         "summary": "Get Models"
+      }
+    },
+    "/api/v1/models/evaluate": {
+      "post": {
+        "operationId": "evaluate_model_api_v1_models_evaluate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EvaluateBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Evaluate Model"
+      }
+    },
+    "/api/v1/models/registry": {
+      "get": {
+        "operationId": "get_model_registry_api_v1_models_registry_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Model Registry"
+      }
+    },
+    "/api/v1/models/registry/{feature}": {
+      "put": {
+        "operationId": "set_model_registry_entry_api_v1_models_registry__feature__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "feature",
+            "required": true,
+            "schema": {
+              "title": "Feature",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegistryUpdateBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Set Model Registry Entry"
       }
     },
     "/api/v1/ollama/models": {

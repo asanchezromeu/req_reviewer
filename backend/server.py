@@ -11,7 +11,7 @@ from typing import List, Optional, Dict, Any
 
 import requests
 from fastapi import Depends, FastAPI, APIRouter, HTTPException, UploadFile, File, Form
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -33,6 +33,7 @@ try:
     from .auth import require_api_key
     from .llm_contract import extract_json
     from . import deterministic_review
+    from . import model_registry
 except ImportError:
     from incose_rules import (
         INCOSE_RULES,
@@ -44,6 +45,7 @@ except ImportError:
     from auth import require_api_key
     from llm_contract import extract_json
     import deterministic_review
+    import model_registry
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
@@ -102,6 +104,7 @@ class MemoryDatabase:
         self.training_examples = MemoryCollection()
         self.training_datasets = MemoryCollection()
         self.distillation_jobs = MemoryCollection()
+        self.model_registry = MemoryCollection()
 
 
 def _matches_query(document: Dict[str, Any], query: Dict[str, Any]) -> bool:
@@ -1079,6 +1082,159 @@ async def delete_job(job_id: str):
     if res.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Not found")
     return {"deleted": True}
+
+
+# ----- Training tier 3 scaffolding: dataset export, model registry, evaluate -----
+# SPEC.md Phase 5. The engine does not fine-tune; it produces the export and
+# consumes/evaluates whatever model comes back from an external LoRA run.
+
+class RegistryUpdateBody(BaseModel):
+    provider: str
+    model: str
+
+
+class EvaluateBody(BaseModel):
+    feature: str = "review"
+    candidate_provider: str
+    candidate_model: str
+    example_ids: Optional[List[str]] = None
+    tailoring_prompt_id: Optional[str] = None
+
+
+@api.post("/datasets/export")
+async def export_dataset(label: Optional[str] = None):
+    query = {"label": label} if label else {}
+    cursor = db.training_examples.find(query, {"_id": 0})
+    examples = await cursor.to_list(10000)
+    if not examples:
+        raise HTTPException(status_code=400, detail="No corpus examples to export")
+
+    lines = [
+        json.dumps(model_registry.build_training_row(example, INDIVIDUAL_SYSTEM_PROMPT))
+        for example in examples
+    ]
+    content = ("\n".join(lines) + "\n").encode("utf-8")
+    return Response(
+        content=content,
+        media_type="application/jsonl",
+        headers={"Content-Disposition": "attachment; filename=corpus_export.jsonl"},
+    )
+
+
+@api.get("/models/registry")
+async def get_model_registry():
+    entries = []
+    for feature in model_registry.FEATURES:
+        doc = await db.model_registry.find_one({"id": feature}, {"_id": 0})
+        if doc:
+            entries.append(doc)
+        else:
+            entries.append({"id": feature, **model_registry.default_entry(), "updated_at": None})
+    return entries
+
+
+@api.put("/models/registry/{feature}")
+async def set_model_registry_entry(feature: str, body: RegistryUpdateBody):
+    if feature not in model_registry.FEATURES:
+        raise HTTPException(status_code=400, detail=f"Unknown feature. Expected one of {model_registry.FEATURES}")
+    entry = {
+        "id": feature,
+        "provider": body.provider,
+        "model": body.model,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    existing = await db.model_registry.find_one({"id": feature})
+    if existing:
+        await db.model_registry.update_one({"id": feature}, {"$set": entry})
+    else:
+        await db.model_registry.insert_one(entry)
+    return entry
+
+
+async def get_active_model(feature: str) -> tuple[str, str]:
+    doc = await db.model_registry.find_one({"id": feature}, {"_id": 0})
+    if doc:
+        return doc["provider"], doc["model"]
+    default = model_registry.default_entry()
+    return default["provider"], default["model"]
+
+
+@api.post("/models/evaluate")
+async def evaluate_model(body: EvaluateBody):
+    if body.feature != "review":
+        raise HTTPException(
+            status_code=400,
+            detail="Only the 'review' feature is currently supported for evaluation",
+        )
+
+    if body.example_ids:
+        examples = []
+        for ex_id in body.example_ids:
+            doc = await db.training_examples.find_one({"id": ex_id}, {"_id": 0})
+            if doc:
+                examples.append(doc)
+    else:
+        cursor = db.training_examples.find({}, {"_id": 0})
+        examples = await cursor.to_list(10000)
+    if not examples:
+        raise HTTPException(status_code=400, detail="No corpus examples available to evaluate against")
+
+    baseline_provider, baseline_model = await get_active_model(body.feature)
+    tailoring = await get_tailoring_prefix(body.tailoring_prompt_id)
+
+    sem = asyncio.Semaphore(8)
+
+    async def run(provider: str, model: str, example: Dict[str, Any]) -> Dict[str, Any]:
+        async with sem:
+            result = await analyze_one(
+                provider,
+                model,
+                f"EX-{example['id'][:8]}",
+                example["requirement_text"],
+                tailoring,
+            )
+            return {
+                "example_id": example["id"],
+                "label": example.get("label"),
+                "score": result.get("overall_score", 0),
+                "degraded": bool(result.get("fallback")),
+            }
+
+    baseline_results, candidate_results = await asyncio.gather(
+        asyncio.gather(*(run(baseline_provider, baseline_model, ex) for ex in examples)),
+        asyncio.gather(*(run(body.candidate_provider, body.candidate_model, ex) for ex in examples)),
+    )
+
+    def summarize(results: List[Dict[str, Any]]) -> Dict[str, Any]:
+        correct = sum(
+            1 for r in results if model_registry.score_matches_expectation(r["label"], r["score"])
+        )
+        return {
+            "average_score": round(sum(r["score"] for r in results) / len(results), 1),
+            "accuracy": round(correct / len(results), 3),
+            "degraded_count": sum(1 for r in results if r["degraded"]),
+        }
+
+    detail = [
+        {
+            "example_id": b["example_id"],
+            "label": b["label"],
+            "baseline_score": b["score"],
+            "candidate_score": c["score"],
+        }
+        for b, c in zip(baseline_results, candidate_results)
+    ]
+
+    return {
+        "feature": body.feature,
+        "baseline": {"provider": baseline_provider, "model": baseline_model, **summarize(baseline_results)},
+        "candidate": {
+            "provider": body.candidate_provider,
+            "model": body.candidate_model,
+            **summarize(candidate_results),
+        },
+        "detail": detail,
+    }
 
 
 # ---------- Mount ----------
