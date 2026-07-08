@@ -1,0 +1,13 @@
+id,domain,component,requirement_type,asil,source,parents,text
+REQ-CAM-001,ADAS Camera,Front Camera,System Requirement,B,SN-CAM-01,SN-CAM-01,"The front camera system shall output video frames with a resolution of at least 1920 x 1080 pixels at 30 fps when ambient illumination is between 1 lux and 100000 lux."
+REQ-CAM-002,ADAS Camera,Front Camera,System Requirement,B,SN-CAM-02,SN-CAM-02,"The front camera shall detect lane markings in all weather conditions."
+REQ-CAM-003,ADAS Camera,Front Camera,System Requirement,B,SN-CAM-03,SN-CAM-03,"The camera shall start quickly."
+REQ-CAM-004,ADAS Camera,Front Camera,System Requirement,B,SN-CAM-04,SN-CAM-04,"The camera system shall provide a valid image stream to the ADAS ECU within 500 ms after ignition-on at supply voltage from 9 V to 16 V."
+REQ-CAM-005,ADAS Camera,Front Camera,System Requirement,B,SN-CAM-04,SN-CAM-04,"The camera system shall provide the first valid image frame to the ADAS ECU within 2 s after ignition-on."
+REQ-CAM-006,ADAS Camera,Front Camera,System Requirement,B,SN-CAM-05,SN-CAM-05,"The camera shall not transmit image data when the vehicle speed is greater than 120 km/h."
+REQ-CAM-007,ADAS Camera,Front Camera,System Requirement,B,SN-CAM-05,SN-CAM-05,"The camera system shall transmit image data continuously while the vehicle speed is between 0 km/h and 200 km/h."
+REQ-ZC-001,Zone Controller,Power Input,System Requirement,C,SN-ZC-01,SN-ZC-01,"The zone controller shall tolerate reverse battery connection of -14 V for 60 s without permanent damage."
+REQ-ZC-002,Zone Controller,Power Input,System Requirement,C,SN-ZC-01,SN-ZC-01,"The zone controller shall withstand reverse battery connection."
+REQ-ZC-003,Zone Controller,CAN Interface,System Requirement,B,SN-ZC-02,SN-ZC-02,"The zone controller shall send the door lock status on CAN message ZC_DoorStatus every 100 ms with a tolerance of +/- 10 ms."
+REQ-ZC-004,Zone Controller,CAN Interface,System Requirement,B,SN-ZC-02,SN-ZC-02,"The zone controller shall send the door lock status periodically on the vehicle network."
+REQ-ZC-005,Zone Controller,Diagnostics,System Requirement,B,,,"The zone controller shall store a diagnostic trouble code within 1 s after detecting an overcurrent condition on any protected high-side output."

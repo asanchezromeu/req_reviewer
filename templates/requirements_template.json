@@ -1,0 +1,24 @@
+{
+  "requirements": [
+    {
+      "id": "REQ-001",
+      "domain": "Zone Controller",
+      "component": "Power Input",
+      "requirement_type": "System Requirement",
+      "asil": "B",
+      "source": "SN-001",
+      "parents": ["SN-001"],
+      "text": "The zone controller shall tolerate reverse battery connection of -14 V for 60 s without permanent damage."
+    },
+    {
+      "id": "REQ-002",
+      "domain": "Zone Controller",
+      "component": "Diagnostics",
+      "requirement_type": "System Requirement",
+      "asil": "B",
+      "source": "SN-002",
+      "parents": ["SN-002"],
+      "text": "The zone controller shall store diagnostic trouble code ZC_OC_01 within 1 s after detecting an overcurrent condition on any protected high-side output."
+    }
+  ]
+}

@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Requirement Set Reviewer</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <section class="topbar" aria-label="Configuration">
+        <div>
+          <h1>Requirement Set Reviewer</h1>
+          <p>ASPICE SYS.2 and INCOSE-guided review for uploaded requirement sets.</p>
+        </div>
+        <div class="config">
+          <label>
+            Ollama model
+            <input id="model" value="gemma3:1b" autocomplete="off">
+          </label>
+          <button id="showPrompt" type="button">Prompt</button>
+        </div>
+      </section>
+
+      <section class="workspace">
+        <aside class="input-pane">
+          <label class="file-drop">
+            <input id="fileInput" type="file" accept=".csv,.json">
+            <span>Upload CSV or JSON</span>
+            <small>Columns: id, text/requirement, source, parents</small>
+          </label>
+
+          <div class="template-actions" aria-label="Download templates">
+            <button id="downloadCsvTemplate" type="button">CSV Template</button>
+            <button id="downloadJsonTemplate" type="button">JSON Template</button>
+          </div>
+
+          <label>
+            Project context
+            <textarea id="projectContext" rows="4" placeholder="Example: Automotive zone controller, system requirements, ASPICE 4.0 assessment."></textarea>
+          </label>
+
+          <label>
+            Paste JSON
+            <textarea id="jsonInput" rows="9" placeholder='{"requirements":[{"id":"REQ-1","text":"The system shall..."}]}'></textarea>
+          </label>
+
+          <div class="actions">
+            <button id="loadPasted" type="button">Load JSON</button>
+            <button id="loadSample" type="button">Sample Conflict</button>
+            <button id="reviewButton" type="button" class="primary" disabled>Review Set</button>
+          </div>
+
+          <p id="status" role="status"></p>
+        </aside>
+
+        <section class="results-pane">
+          <div class="metrics">
+            <article>
+              <span>Requirements</span>
+              <strong id="metricCount">0</strong>
+            </article>
+            <article>
+              <span>Average</span>
+              <strong id="metricAverage">-</strong>
+            </article>
+            <article>
+              <span>Below 85%</span>
+              <strong id="metricWeak">0</strong>
+            </article>
+            <article>
+              <span>Conflicts</span>
+              <strong id="metricConflicts">0</strong>
+            </article>
+          </div>
+
+          <section class="panel">
+            <div class="panel-header">
+              <h2>Loaded Requirements</h2>
+              <button id="exportButton" type="button" disabled>Export JSON</button>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Requirement</th>
+                    <th>Source</th>
+                  </tr>
+                </thead>
+                <tbody id="requirementsBody"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="panel">
+            <h2>Scores</h2>
+            <div id="scoreList" class="score-list empty">Run a review to see scores.</div>
+          </section>
+
+          <section class="panel">
+            <h2>Conflicts</h2>
+            <div id="conflictList" class="conflict-list empty">No review results yet.</div>
+          </section>
+        </section>
+      </section>
+    </main>
+
+    <dialog id="promptDialog">
+      <div class="dialog-header">
+        <h2>Reviewer System Prompt</h2>
+        <button id="closePrompt" type="button">Close</button>
+      </div>
+      <pre id="promptText"></pre>
+    </dialog>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,3 @@
+id,domain,component,requirement_type,asil,source,parents,text
+REQ-001,Zone Controller,Power Input,System Requirement,B,SN-001,SN-001,"The zone controller shall tolerate reverse battery connection of -14 V for 60 s without permanent damage."
+REQ-002,Zone Controller,Diagnostics,System Requirement,B,SN-002,SN-002,"The zone controller shall store diagnostic trouble code ZC_OC_01 within 1 s after detecting an overcurrent condition on any protected high-side output."

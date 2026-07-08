@@ -1,0 +1,1121 @@
+import os
+import io
+import json
+import uuid
+import csv
+import asyncio
+import logging
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import List, Optional, Dict, Any
+
+import requests
+from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File, Form
+from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+from dotenv import load_dotenv
+from starlette.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
+
+try:
+    from motor.motor_asyncio import AsyncIOMotorClient
+except ImportError:
+    AsyncIOMotorClient = None
+
+try:
+    from .incose_rules import (
+        INCOSE_RULES,
+        INDIVIDUAL_SYSTEM_PROMPT,
+        CONSISTENCY_SYSTEM_PROMPT,
+        SUMMARIZER_SYSTEM_PROMPT,
+    )
+    from .showcase import create_showcase_router
+except ImportError:
+    from incose_rules import (
+        INCOSE_RULES,
+        INDIVIDUAL_SYSTEM_PROMPT,
+        CONSISTENCY_SYSTEM_PROMPT,
+        SUMMARIZER_SYSTEM_PROMPT,
+    )
+    from showcase import create_showcase_router
+
+ROOT_DIR = Path(__file__).parent
+load_dotenv(ROOT_DIR / ".env")
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+logger = logging.getLogger("reqiq")
+
+class MemoryDeleteResult:
+    def __init__(self, deleted_count: int):
+        self.deleted_count = deleted_count
+
+
+class MemoryCursor:
+    def __init__(self, documents: List[Dict[str, Any]]):
+        self.documents = documents
+
+    def sort(self, key: str, direction: int):
+        self.documents.sort(key=lambda item: item.get(key, ""), reverse=direction < 0)
+        return self
+
+    async def to_list(self, limit: int):
+        return self.documents[:limit]
+
+
+class MemoryCollection:
+    def __init__(self):
+        self.documents: List[Dict[str, Any]] = []
+
+    async def insert_one(self, document: Dict[str, Any]):
+        self.documents.append(dict(document))
+
+    async def find_one(self, query: Dict[str, Any], projection: Optional[Dict[str, int]] = None):
+        document = next((item for item in self.documents if _matches_query(item, query)), None)
+        return _apply_projection(document, projection)
+
+    def find(self, query: Dict[str, Any], projection: Optional[Dict[str, int]] = None):
+        rows = [_apply_projection(item, projection) for item in self.documents if _matches_query(item, query)]
+        return MemoryCursor([row for row in rows if row is not None])
+
+    async def delete_one(self, query: Dict[str, Any]):
+        for index, item in enumerate(self.documents):
+            if _matches_query(item, query):
+                self.documents.pop(index)
+                return MemoryDeleteResult(1)
+        return MemoryDeleteResult(0)
+
+    async def update_one(self, query: Dict[str, Any], update: Dict[str, Any]):
+        document = next((item for item in self.documents if _matches_query(item, query)), None)
+        if document is not None:
+            document.update(update.get("$set", {}))
+
+
+class MemoryDatabase:
+    def __init__(self):
+        self.requirement_sets = MemoryCollection()
+        self.system_prompts = MemoryCollection()
+        self.training_examples = MemoryCollection()
+        self.training_datasets = MemoryCollection()
+        self.distillation_jobs = MemoryCollection()
+
+
+def _matches_query(document: Dict[str, Any], query: Dict[str, Any]) -> bool:
+    return all(document.get(key) == value for key, value in query.items())
+
+
+def _apply_projection(
+    document: Optional[Dict[str, Any]],
+    projection: Optional[Dict[str, int]],
+) -> Optional[Dict[str, Any]]:
+    if document is None:
+        return None
+    result = dict(document)
+    for key, included in (projection or {}).items():
+        if not included:
+            result.pop(key, None)
+    return result
+
+
+mongo_url = os.environ.get("MONGO_URL")
+client = None
+if mongo_url and AsyncIOMotorClient is not None:
+    client = AsyncIOMotorClient(mongo_url)
+    db = client[os.environ.get("DB_NAME", "req_reviewer")]
+else:
+    db = MemoryDatabase()
+    logger.info("Using in-memory storage. Configure MONGO_URL for persistent data.")
+app = FastAPI(title="ReqIQ API")
+api = APIRouter(prefix="/api")
+
+
+# ---------- Models ----------
+
+AVAILABLE_MODELS = {
+    "ollama": [
+        {"id": "gemma3:1b", "label": "Gemma 3 1B (local default)"},
+        {"id": "gemma3:4b", "label": "Gemma 3 4B"},
+        {"id": "qwen3:4b", "label": "Qwen 3 4B"},
+        {"id": "llama3.2:3b", "label": "Llama 3.2 3B"},
+    ],
+    "openai": [
+        {"id": "gpt-4o-mini", "label": "GPT-4o mini (fast)"},
+        {"id": "gpt-4o", "label": "GPT-4o"},
+        {"id": "gpt-5-mini", "label": "GPT-5 mini"},
+        {"id": "gpt-5", "label": "GPT-5"},
+        {"id": "gpt-5.4", "label": "GPT-5.4 (recommended)"},
+    ],
+    "anthropic": [
+        {"id": "claude-haiku-4-5-20251001", "label": "Claude Haiku 4.5 (fast)"},
+        {"id": "claude-sonnet-4-5-20250929", "label": "Claude Sonnet 4.5"},
+        {"id": "claude-sonnet-4-6", "label": "Claude Sonnet 4.6 (recommended)"},
+    ],
+    "gemini": [
+        {"id": "gemini-2.5-flash-lite", "label": "Gemini 2.5 Flash Lite (fast)"},
+        {"id": "gemini-2.5-flash", "label": "Gemini 2.5 Flash"},
+        {"id": "gemini-3-flash-preview", "label": "Gemini 3 Flash"},
+        {"id": "gemini-3.1-pro-preview", "label": "Gemini 3.1 Pro (recommended)"},
+    ],
+}
+
+
+class Requirement(BaseModel):
+    id: str
+    text: str
+    source: Optional[str] = None
+
+
+class UploadResponse(BaseModel):
+    set_id: str
+    name: str
+    count: int
+    requirements: List[Requirement]
+
+
+class RequirementSet(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    count: int
+    requirements: List[Requirement]
+
+
+class AnalyzeIndividualBody(BaseModel):
+    text: str
+    requirement_id: Optional[str] = "REQ-X"
+    provider: str
+    model: str
+    ollama_url: Optional[str] = None
+    tailoring_prompt_id: Optional[str] = None
+
+
+class AnalyzeSetBody(BaseModel):
+    set_id: str
+    provider: str
+    model: str
+    ollama_url: Optional[str] = None
+    tailoring_prompt_id: Optional[str] = None
+
+
+class AskBody(BaseModel):
+    set_id: str
+    question: str
+    provider: str
+    model: str
+    ollama_url: Optional[str] = None
+    history: Optional[List[Dict[str, str]]] = None
+    tailoring_prompt_id: Optional[str] = None
+
+
+class SystemPrompt(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str
+    kind: str  # "classifier" | "tailoring"
+    system_prompt: str
+    categories: List[str] = []  # only used when kind == "classifier"
+    description: Optional[str] = ""
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+
+class SystemPromptCreate(BaseModel):
+    name: str
+    kind: str
+    system_prompt: str
+    categories: List[str] = []
+    description: Optional[str] = ""
+
+
+class PromptGenerateBody(BaseModel):
+    kind: str  # "classifier" | "tailoring"
+    project_description: str
+    provider: str
+    model: str
+    ollama_url: Optional[str] = None
+    categories_hint: Optional[List[str]] = None
+
+
+class ClassifyBody(BaseModel):
+    set_id: str
+    provider: str
+    model: str
+    ollama_url: Optional[str] = None
+    prompt_id: Optional[str] = None
+    system_prompt: Optional[str] = None
+    categories: Optional[List[str]] = None
+
+
+class TrainingExample(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    label: str  # "good" or "bad"
+    requirement_text: str
+    explanation: Optional[str] = ""
+    corrected_text: Optional[str] = ""
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+
+class TrainingExampleCreate(BaseModel):
+    label: str
+    requirement_text: str
+    explanation: Optional[str] = ""
+    corrected_text: Optional[str] = ""
+
+
+class TrainingDataset(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str
+    sample_count: int
+    samples: List[Dict[str, Any]]  # {"messages": [...]}-style JSONL rows
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+
+class DistillationJob(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str
+    base_model: str
+    dataset_id: str
+    dataset_name: str
+    openai_job_id: Optional[str] = None
+    openai_file_id: Optional[str] = None
+    fine_tuned_model: Optional[str] = None
+    status: str = "queued"  # queued, validating_files, running, succeeded, failed, cancelled
+    error: Optional[str] = None
+    hyperparameters: Dict[str, Any] = {}
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+
+class DistillationStartBody(BaseModel):
+    name: str
+    dataset_id: str
+    base_model: str = "gpt-4o-mini-2024-07-18"
+    openai_api_key: str
+    n_epochs: Optional[int] = 3
+
+
+# ---------- Helpers ----------
+
+async def llm_complete(
+    provider: str,
+    model: str,
+    system_message: str,
+    user_text: str,
+    ollama_url: Optional[str] = None,
+) -> str:
+    if provider == "ollama":
+        endpoint = (ollama_url or os.environ.get("OLLAMA_URL") or "http://localhost:11434").rstrip("/")
+
+        def call_ollama() -> str:
+            response = requests.post(
+                f"{endpoint}/api/chat",
+                json={
+                    "model": model or os.environ.get("OLLAMA_MODEL", "gemma3:1b"),
+                    "stream": False,
+                    "format": "json",
+                    "options": {"temperature": 0.05, "num_ctx": 8192},
+                    "messages": [
+                        {"role": "system", "content": system_message},
+                        {"role": "user", "content": user_text},
+                    ],
+                },
+                timeout=180,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            return str((payload.get("message") or {}).get("content") or "")
+
+        return await asyncio.to_thread(call_ollama)
+
+    def call_hosted() -> str:
+        if provider == "openai":
+            api_key = os.environ.get("OPENAI_API_KEY")
+            if not api_key:
+                raise RuntimeError("OPENAI_API_KEY is not configured")
+            response = requests.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={
+                    "model": model,
+                    "temperature": 0.05,
+                    "response_format": {"type": "json_object"},
+                    "messages": [
+                        {"role": "system", "content": system_message},
+                        {"role": "user", "content": user_text},
+                    ],
+                },
+                timeout=180,
+            )
+            response.raise_for_status()
+            return str(response.json()["choices"][0]["message"]["content"])
+
+        if provider == "anthropic":
+            api_key = os.environ.get("ANTHROPIC_API_KEY")
+            if not api_key:
+                raise RuntimeError("ANTHROPIC_API_KEY is not configured")
+            response = requests.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": api_key,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+                json={
+                    "model": model,
+                    "max_tokens": 4096,
+                    "temperature": 0.05,
+                    "system": system_message,
+                    "messages": [{"role": "user", "content": user_text}],
+                },
+                timeout=180,
+            )
+            response.raise_for_status()
+            return "".join(block.get("text", "") for block in response.json().get("content", []))
+
+        if provider == "gemini":
+            api_key = os.environ.get("GEMINI_API_KEY")
+            if not api_key:
+                raise RuntimeError("GEMINI_API_KEY is not configured")
+            response = requests.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+                params={"key": api_key},
+                json={
+                    "system_instruction": {"parts": [{"text": system_message}]},
+                    "contents": [{"role": "user", "parts": [{"text": user_text}]}],
+                    "generationConfig": {
+                        "temperature": 0.05,
+                        "responseMimeType": "application/json",
+                    },
+                },
+                timeout=180,
+            )
+            response.raise_for_status()
+            parts = response.json()["candidates"][0]["content"]["parts"]
+            return "".join(part.get("text", "") for part in parts)
+
+        raise RuntimeError(f"Unsupported provider: {provider}")
+
+    return await asyncio.to_thread(call_hosted)
+
+
+def parse_json_strict(text: str) -> Dict[str, Any]:
+    """Extract JSON object from LLM output, tolerant to markdown fences."""
+    t = text.strip()
+    if t.startswith("```"):
+        # strip ``` fences
+        t = t.strip("`")
+        # remove possible language tag like 'json\n'
+        if "\n" in t:
+            first, rest = t.split("\n", 1)
+            if first.lower().strip() in ("json", ""):
+                t = rest
+    start = t.find("{")
+    end = t.rfind("}")
+    if start == -1 or end == -1:
+        raise ValueError("No JSON object in response")
+    return json.loads(t[start : end + 1])
+
+
+def parse_uploaded_requirements(filename: str, content: bytes) -> List[Requirement]:
+    name = (filename or "").lower()
+    text = content.decode("utf-8", errors="ignore")
+    items: List[Requirement] = []
+    if name.endswith(".json"):
+        data = json.loads(text)
+        if isinstance(data, dict) and "requirements" in data:
+            data = data["requirements"]
+        if not isinstance(data, list):
+            raise ValueError("JSON must be an array of requirements or {requirements:[...]}.")
+        for i, row in enumerate(data, start=1):
+            if isinstance(row, str):
+                items.append(Requirement(id=f"REQ-{i:03d}", text=row))
+            elif isinstance(row, dict):
+                rid = str(row.get("id") or row.get("ID") or row.get("req_id") or f"REQ-{i:03d}")
+                rtext = row.get("text") or row.get("requirement") or row.get("description") or ""
+                src = row.get("source") or row.get("Source")
+                items.append(Requirement(id=rid, text=str(rtext), source=src))
+    else:
+        # CSV
+        reader = csv.DictReader(io.StringIO(text))
+        if reader.fieldnames is None:
+            raise ValueError("CSV is empty or missing header.")
+        lowered = {h.lower(): h for h in reader.fieldnames}
+        id_col = lowered.get("id") or lowered.get("req_id") or lowered.get("requirement_id")
+        text_col = lowered.get("text") or lowered.get("requirement") or lowered.get("description")
+        if not text_col:
+            # fall back to first column as text
+            text_col = reader.fieldnames[0]
+        src_col = lowered.get("source")
+        for i, row in enumerate(reader, start=1):
+            rid = str(row.get(id_col)).strip() if id_col else f"REQ-{i:03d}"
+            if not rid:
+                rid = f"REQ-{i:03d}"
+            rtext = str(row.get(text_col, "")).strip()
+            if not rtext:
+                continue
+            src = str(row.get(src_col, "")).strip() if src_col else None
+            items.append(Requirement(id=rid, text=rtext, source=src))
+    if not items:
+        raise ValueError("No requirements found in file.")
+    return items
+
+
+# ---------- Routes ----------
+
+@api.get("/")
+async def root():
+    return {"name": "ReqIQ API", "ok": True}
+
+
+@api.get("/models")
+async def get_models():
+    return AVAILABLE_MODELS
+
+
+@api.get("/ollama/models")
+async def get_ollama_models(url: str = "http://localhost:11434"):
+    endpoint = url.rstrip("/")
+
+    def fetch_models():
+        response = requests.get(f"{endpoint}/api/tags", timeout=10)
+        response.raise_for_status()
+        return response.json()
+
+    try:
+        payload = await asyncio.to_thread(fetch_models)
+    except requests.RequestException as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Could not connect to Ollama at {endpoint}: {exc}",
+        ) from exc
+
+    models = []
+    for item in payload.get("models", []):
+        model_id = str(item.get("name") or item.get("model") or "").strip()
+        if not model_id:
+            continue
+        details = item.get("details") or {}
+        parameter_size = str(details.get("parameter_size") or "").strip()
+        label = f"{model_id} ({parameter_size})" if parameter_size else model_id
+        models.append({"id": model_id, "label": label})
+    return models
+
+
+@api.get("/incose/rules")
+async def get_incose_rules():
+    return INCOSE_RULES
+
+
+# ----- Requirement sets -----
+
+@api.post("/requirements/upload", response_model=UploadResponse)
+async def upload_requirements(file: UploadFile = File(...), name: Optional[str] = Form(None)):
+    content = await file.read()
+    try:
+        reqs = parse_uploaded_requirements(file.filename, content)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to parse file: {e}")
+    set_obj = RequirementSet(name=name or file.filename, count=len(reqs), requirements=reqs)
+    await db.requirement_sets.insert_one(set_obj.model_dump())
+    return UploadResponse(set_id=set_obj.id, name=set_obj.name, count=set_obj.count, requirements=reqs)
+
+
+@api.get("/requirements/sets")
+async def list_requirement_sets():
+    cursor = db.requirement_sets.find({}, {"_id": 0, "requirements": 0}).sort("created_at", -1)
+    return await cursor.to_list(200)
+
+
+@api.get("/requirements/sets/{set_id}")
+async def get_requirement_set(set_id: str):
+    doc = await db.requirement_sets.find_one({"id": set_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Set not found")
+    return doc
+
+
+@api.delete("/requirements/sets/{set_id}")
+async def delete_requirement_set(set_id: str):
+    res = await db.requirement_sets.delete_one({"id": set_id})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Set not found")
+    return {"deleted": True}
+
+
+# ----- Analysis -----
+
+async def get_tailoring_prefix(tailoring_prompt_id: Optional[str]) -> str:
+    if not tailoring_prompt_id:
+        return ""
+    doc = await db.system_prompts.find_one({"id": tailoring_prompt_id}, {"_id": 0})
+    if not doc:
+        return ""
+    extra = (doc.get("system_prompt") or "").strip()
+    if not extra:
+        return ""
+    return f"PROJECT TAILORING CONTEXT (apply this lens to your analysis):\n{extra}\n\n"
+
+
+async def analyze_one(
+    provider: str,
+    model: str,
+    req_id: str,
+    req_text: str,
+    tailoring: str = "",
+    ollama_url: Optional[str] = None,
+) -> Dict[str, Any]:
+    user = f"Requirement ID: {req_id}\nRequirement text: \"{req_text}\""
+    try:
+        sys_msg = (tailoring or "") + INDIVIDUAL_SYSTEM_PROMPT
+        raw = await llm_complete(provider, model, sys_msg, user, ollama_url)
+        parsed = parse_json_strict(raw)
+        parsed["requirement_id"] = req_id
+        parsed["requirement_text"] = req_text
+        return parsed
+    except Exception as e:
+        logger.exception("analyze_one failed")
+        return {
+            "requirement_id": req_id,
+            "requirement_text": req_text,
+            "overall_score": 0,
+            "summary": f"Analysis failed: {e}",
+            "proposed_fix": req_text,
+            "rules": {r["key"]: {"score": 0, "finding": "Analysis failed"} for r in INCOSE_RULES},
+            "error": str(e),
+        }
+
+
+@api.post("/analyze/individual")
+async def analyze_individual(body: AnalyzeIndividualBody):
+    tailoring = await get_tailoring_prefix(body.tailoring_prompt_id)
+    return await analyze_one(
+        body.provider,
+        body.model,
+        body.requirement_id or "REQ-X",
+        body.text,
+        tailoring,
+        body.ollama_url,
+    )
+
+
+@api.post("/analyze/set")
+async def analyze_set(body: AnalyzeSetBody):
+    doc = await db.requirement_sets.find_one({"id": body.set_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Set not found")
+    requirements = doc.get("requirements", [])
+    tailoring = await get_tailoring_prefix(body.tailoring_prompt_id)
+
+    # Run per-requirement LLM calls in parallel, bounded concurrency
+    # to avoid hitting provider rate limits and ingress proxy timeouts.
+    sem = asyncio.Semaphore(8)
+
+    async def run_one(r):
+        async with sem:
+            return await analyze_one(
+                body.provider,
+                body.model,
+                r["id"],
+                r["text"],
+                tailoring,
+                body.ollama_url,
+            )
+
+    # Run the per-requirement scoring and the consistency pass concurrently.
+    listing = "\n".join([f"- [{r['id']}] {r['text']}" for r in requirements])
+
+    async def run_consistency():
+        try:
+            raw = await llm_complete(
+                body.provider, body.model, (tailoring or "") + CONSISTENCY_SYSTEM_PROMPT,
+                f"Requirements set:\n{listing}",
+                body.ollama_url,
+            )
+            return parse_json_strict(raw)
+        except Exception as e:
+            logger.exception("consistency failed")
+            return {"inconsistencies": [], "error": str(e)}
+
+    results, consistency = await asyncio.gather(
+        asyncio.gather(*(run_one(r) for r in requirements)),
+        run_consistency(),
+    )
+    results = list(results)
+
+    # cross-reference per-requirement: tag if appears in any inconsistency
+    incon_ids = set()
+    for inc in consistency.get("inconsistencies", []):
+        for rid in inc.get("requirement_ids", []):
+            incon_ids.add(rid)
+    for item in results:
+        item["has_inconsistency"] = item["requirement_id"] in incon_ids
+
+    avg = round(sum(r.get("overall_score", 0) for r in results) / max(len(results), 1), 1) if results else 0
+    return {
+        "set_id": body.set_id,
+        "set_name": doc.get("name"),
+        "average_score": avg,
+        "results": results,
+        "inconsistencies": consistency.get("inconsistencies", []),
+        "model": f"{body.provider}/{body.model}",
+        "analyzed_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@api.post("/summarize/ask")
+async def summarize_ask(body: AskBody):
+    doc = await db.requirement_sets.find_one({"id": body.set_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Set not found")
+    requirements = doc.get("requirements", [])
+    listing = "\n".join([f"[{r['id']}] {r['text']}" for r in requirements])
+    tailoring = await get_tailoring_prefix(body.tailoring_prompt_id)
+    sys_msg = (tailoring or "") + SUMMARIZER_SYSTEM_PROMPT + "\n\nRequirements set:\n" + listing
+    try:
+        # Use a fresh session each call but keep history client-side
+        history = body.history or []
+        # send conversation as a single rolled message preceded by history snippet
+        if history:
+            conv = "\n".join([f"{m.get('role','user')}: {m.get('content','')}" for m in history])
+            user_text = f"Previous conversation:\n{conv}\n\nNew question:\n{body.question}"
+        else:
+            user_text = body.question
+        reply = await llm_complete(body.provider, body.model, sys_msg, user_text, body.ollama_url)
+        return {"answer": reply}
+    except Exception as e:
+        logger.exception("summarize_ask failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ----- Classifier -----
+
+CLASSIFIER_BASE_INSTRUCTION = """You are an AI requirements classifier.
+You will receive a set of engineering requirements. For EACH requirement assign exactly one primary category from the list of allowed categories provided in the system prompt below.
+You may also list up to two secondary categories if relevant.
+
+Return ONLY a strict JSON object in this exact shape — no markdown, no commentary:
+{
+  "results": [
+    {
+      "requirement_id": "<id>",
+      "primary_category": "<one of the allowed categories>",
+      "secondary_categories": ["<optional>", "<optional>"],
+      "confidence": <integer 0-100>,
+      "rationale": "<one-sentence justification>"
+    }
+  ]
+}
+"""
+
+
+@api.post("/classify/set")
+async def classify_set(body: ClassifyBody):
+    doc = await db.requirement_sets.find_one({"id": body.set_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Set not found")
+    requirements = doc.get("requirements", [])
+
+    user_system_prompt = (body.system_prompt or "").strip()
+    categories = list(body.categories or [])
+    if body.prompt_id:
+        p = await db.system_prompts.find_one({"id": body.prompt_id}, {"_id": 0})
+        if not p:
+            raise HTTPException(status_code=404, detail="Prompt not found")
+        if p.get("kind") != "classifier":
+            raise HTTPException(status_code=400, detail="Prompt is not a classifier prompt")
+        user_system_prompt = p.get("system_prompt", "")
+        categories = p.get("categories", []) or categories
+    if not user_system_prompt:
+        raise HTTPException(status_code=400, detail="A classifier system prompt is required (prompt_id or system_prompt)")
+
+    cats_line = ", ".join(categories) if categories else "(infer reasonable categories from the system prompt)"
+    sys_msg = (
+        f"{user_system_prompt}\n\n"
+        f"ALLOWED CATEGORIES: {cats_line}\n\n"
+        f"{CLASSIFIER_BASE_INSTRUCTION}"
+    )
+    listing = "\n".join([f"- [{r['id']}] {r['text']}" for r in requirements])
+    try:
+        raw = await llm_complete(
+            body.provider,
+            body.model,
+            sys_msg,
+            f"Requirements:\n{listing}",
+            body.ollama_url,
+        )
+        parsed = parse_json_strict(raw)
+        results = parsed.get("results", [])
+    except Exception as e:
+        logger.exception("classify_set failed")
+        raise HTTPException(status_code=500, detail=f"Classification failed: {e}")
+
+    # join with requirement text
+    by_id = {r["id"]: r for r in requirements}
+    enriched = []
+    for r in results:
+        rid = r.get("requirement_id")
+        enriched.append({
+            **r,
+            "requirement_text": (by_id.get(rid) or {}).get("text", ""),
+        })
+
+    # category distribution
+    dist: Dict[str, int] = {}
+    for r in enriched:
+        cat = r.get("primary_category") or "Unclassified"
+        dist[cat] = dist.get(cat, 0) + 1
+
+    return {
+        "set_id": body.set_id,
+        "set_name": doc.get("name"),
+        "categories": categories,
+        "results": enriched,
+        "distribution": dist,
+        "model": f"{body.provider}/{body.model}",
+        "classified_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+# ----- System Prompts library (tailoring & classifier) -----
+
+TAILORING_GENERATOR_INSTRUCTION = """You are an expert systems engineer and prompt engineer.
+The user will describe their project / domain / standard. Produce a CONCISE system prompt (3-8 sentences) that another LLM can prepend when evaluating requirements for this specific project.
+Capture: domain, criticality level (safety, security), key standards / regulations to honour, terminology preferences, and any verification expectations.
+Return ONLY valid JSON, no markdown:
+{
+  "name": "<short 2-5 word title for this tailoring>",
+  "description": "<one-sentence description>",
+  "system_prompt": "<the prompt content>"
+}
+"""
+
+CLASSIFIER_GENERATOR_INSTRUCTION = """You are an expert systems engineer.
+The user will describe their project and the kinds of categories / departments they want to classify requirements into. Produce:
+1. A short system prompt that frames the classification task for this project.
+2. A list of 4-10 clear, mutually-exclusive category names.
+
+If the user gave a categories hint, refine and use those names. Otherwise infer sensible ones for the domain (e.g., Functional, Performance, Safety, Security, Usability, Interface, Regulatory, etc.).
+
+Return ONLY valid JSON, no markdown:
+{
+  "name": "<short 2-5 word title>",
+  "description": "<one-sentence description>",
+  "system_prompt": "<the framing system prompt>",
+  "categories": ["<category 1>", "<category 2>", ...]
+}
+"""
+
+
+@api.post("/prompts", response_model=SystemPrompt)
+async def create_prompt(body: SystemPromptCreate):
+    if body.kind not in ("classifier", "tailoring"):
+        raise HTTPException(status_code=400, detail="kind must be 'classifier' or 'tailoring'")
+    p = SystemPrompt(**body.model_dump())
+    await db.system_prompts.insert_one(p.model_dump())
+    return p
+
+
+@api.get("/prompts")
+async def list_prompts(kind: Optional[str] = None):
+    q: Dict[str, Any] = {}
+    if kind:
+        q["kind"] = kind
+    cursor = db.system_prompts.find(q, {"_id": 0}).sort("created_at", -1)
+    return await cursor.to_list(500)
+
+
+@api.get("/prompts/{prompt_id}")
+async def get_prompt(prompt_id: str):
+    doc = await db.system_prompts.find_one({"id": prompt_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Not found")
+    return doc
+
+
+@api.delete("/prompts/{prompt_id}")
+async def delete_prompt(prompt_id: str):
+    res = await db.system_prompts.delete_one({"id": prompt_id})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Not found")
+    return {"deleted": True}
+
+
+@api.post("/prompts/generate")
+async def generate_prompt(body: PromptGenerateBody):
+    if body.kind not in ("classifier", "tailoring"):
+        raise HTTPException(status_code=400, detail="kind must be 'classifier' or 'tailoring'")
+    if not body.project_description.strip():
+        raise HTTPException(status_code=400, detail="project_description is required")
+    if body.kind == "classifier":
+        sys_msg = CLASSIFIER_GENERATOR_INSTRUCTION
+        hint = ""
+        if body.categories_hint:
+            hint = "\nCategories hint from user: " + ", ".join(body.categories_hint)
+        user_text = f"Project description:\n{body.project_description}{hint}"
+    else:
+        sys_msg = TAILORING_GENERATOR_INSTRUCTION
+        user_text = f"Project description:\n{body.project_description}"
+    try:
+        raw = await llm_complete(body.provider, body.model, sys_msg, user_text, body.ollama_url)
+        parsed = parse_json_strict(raw)
+    except Exception as e:
+        logger.exception("generate_prompt failed")
+        raise HTTPException(status_code=500, detail=str(e))
+    return {
+        "kind": body.kind,
+        "name": parsed.get("name", "Generated prompt"),
+        "description": parsed.get("description", ""),
+        "system_prompt": parsed.get("system_prompt", ""),
+        "categories": parsed.get("categories", []) if body.kind == "classifier" else [],
+    }
+
+
+# ----- Training examples -----
+
+@api.post("/training/examples", response_model=TrainingExample)
+async def create_example(body: TrainingExampleCreate):
+    if body.label not in ("good", "bad"):
+        raise HTTPException(status_code=400, detail="label must be 'good' or 'bad'")
+    ex = TrainingExample(**body.model_dump())
+    await db.training_examples.insert_one(ex.model_dump())
+    return ex
+
+
+@api.get("/training/examples")
+async def list_examples():
+    cursor = db.training_examples.find({}, {"_id": 0}).sort("created_at", -1)
+    return await cursor.to_list(1000)
+
+
+@api.delete("/training/examples/{ex_id}")
+async def delete_example(ex_id: str):
+    res = await db.training_examples.delete_one({"id": ex_id})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Not found")
+    return {"deleted": True}
+
+
+# ----- Training datasets -----
+
+def parse_dataset_file(filename: str, content: bytes) -> List[Dict[str, Any]]:
+    name = (filename or "").lower()
+    text = content.decode("utf-8", errors="ignore")
+    rows: List[Dict[str, Any]] = []
+    if name.endswith(".jsonl"):
+        for line in text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            rows.append(json.loads(line))
+    elif name.endswith(".json"):
+        data = json.loads(text)
+        if isinstance(data, list):
+            rows = data
+        else:
+            raise ValueError("JSON dataset must be a list")
+    else:
+        # CSV with columns prompt,completion or system,user,assistant
+        reader = csv.DictReader(io.StringIO(text))
+        for row in reader:
+            rows.append(row)
+    if not rows:
+        raise ValueError("Empty dataset")
+    return rows
+
+
+@api.post("/training/datasets")
+async def upload_dataset(file: UploadFile = File(...), name: Optional[str] = Form(None)):
+    content = await file.read()
+    try:
+        rows = parse_dataset_file(file.filename, content)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to parse dataset: {e}")
+    ds = TrainingDataset(name=name or file.filename, sample_count=len(rows), samples=rows)
+    await db.training_datasets.insert_one(ds.model_dump())
+    return {"id": ds.id, "name": ds.name, "sample_count": ds.sample_count, "created_at": ds.created_at}
+
+
+@api.get("/training/datasets")
+async def list_datasets():
+    cursor = db.training_datasets.find({}, {"_id": 0, "samples": 0}).sort("created_at", -1)
+    return await cursor.to_list(200)
+
+
+@api.get("/training/datasets/{ds_id}")
+async def get_dataset(ds_id: str):
+    doc = await db.training_datasets.find_one({"id": ds_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Not found")
+    return doc
+
+
+@api.delete("/training/datasets/{ds_id}")
+async def delete_dataset(ds_id: str):
+    res = await db.training_datasets.delete_one({"id": ds_id})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Not found")
+    return {"deleted": True}
+
+
+# ----- Distillation (OpenAI fine-tuning) -----
+
+def samples_to_jsonl_bytes(samples: List[Dict[str, Any]]) -> bytes:
+    """Convert dataset samples to OpenAI chat fine-tune JSONL: {"messages":[...]}."""
+    lines: List[str] = []
+    for row in samples:
+        if "messages" in row and isinstance(row["messages"], list):
+            lines.append(json.dumps({"messages": row["messages"]}))
+            continue
+        # prompt/completion -> chat format
+        sys_msg = row.get("system") or "You are a helpful assistant."
+        user = row.get("user") or row.get("prompt") or row.get("input") or ""
+        assistant = row.get("assistant") or row.get("completion") or row.get("output") or ""
+        if not user or not assistant:
+            continue
+        lines.append(json.dumps({
+            "messages": [
+                {"role": "system", "content": str(sys_msg)},
+                {"role": "user", "content": str(user)},
+                {"role": "assistant", "content": str(assistant)},
+            ]
+        }))
+    if not lines:
+        raise ValueError("Dataset did not contain valid samples (needs messages OR prompt/completion fields).")
+    return ("\n".join(lines)).encode("utf-8")
+
+
+@api.post("/distillation/jobs")
+async def start_distillation(body: DistillationStartBody):
+    ds = await db.training_datasets.find_one({"id": body.dataset_id}, {"_id": 0})
+    if not ds:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    try:
+        jsonl_bytes = samples_to_jsonl_bytes(ds.get("samples", []))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    job = DistillationJob(
+        name=body.name,
+        base_model=body.base_model,
+        dataset_id=body.dataset_id,
+        dataset_name=ds.get("name"),
+        status="uploading_file",
+        hyperparameters={"n_epochs": body.n_epochs} if body.n_epochs else {},
+    )
+
+    headers = {"Authorization": f"Bearer {body.openai_api_key}"}
+
+    # 1) Upload file
+    try:
+        files = {"file": ("training.jsonl", jsonl_bytes, "application/jsonl")}
+        data = {"purpose": "fine-tune"}
+        r = requests.post("https://api.openai.com/v1/files", headers=headers, files=files, data=data, timeout=60)
+        if r.status_code >= 300:
+            job.status = "failed"
+            job.error = f"file upload: {r.status_code} {r.text}"
+            await db.distillation_jobs.insert_one(job.model_dump())
+            raise HTTPException(status_code=400, detail=job.error)
+        file_id = r.json().get("id")
+        job.openai_file_id = file_id
+    except HTTPException:
+        raise
+    except Exception as e:
+        job.status = "failed"
+        job.error = f"file upload error: {e}"
+        await db.distillation_jobs.insert_one(job.model_dump())
+        raise HTTPException(status_code=500, detail=job.error)
+
+    # 2) Create fine-tuning job
+    payload: Dict[str, Any] = {"training_file": file_id, "model": body.base_model}
+    if body.n_epochs:
+        payload["hyperparameters"] = {"n_epochs": body.n_epochs}
+    try:
+        r = requests.post(
+            "https://api.openai.com/v1/fine_tuning/jobs",
+            headers={**headers, "Content-Type": "application/json"},
+            json=payload, timeout=30,
+        )
+        if r.status_code >= 300:
+            job.status = "failed"
+            job.error = f"create job: {r.status_code} {r.text}"
+            await db.distillation_jobs.insert_one(job.model_dump())
+            raise HTTPException(status_code=400, detail=job.error)
+        body_json = r.json()
+        job.openai_job_id = body_json.get("id")
+        job.status = body_json.get("status", "queued")
+    except HTTPException:
+        raise
+    except Exception as e:
+        job.status = "failed"
+        job.error = f"create job error: {e}"
+        await db.distillation_jobs.insert_one(job.model_dump())
+        raise HTTPException(status_code=500, detail=job.error)
+
+    await db.distillation_jobs.insert_one(job.model_dump())
+    return job
+
+
+@api.get("/distillation/jobs")
+async def list_jobs():
+    cursor = db.distillation_jobs.find({}, {"_id": 0}).sort("created_at", -1)
+    return await cursor.to_list(200)
+
+
+@api.post("/distillation/jobs/{job_id}/refresh")
+async def refresh_job(job_id: str, openai_api_key: str = Form(...)):
+    job = await db.distillation_jobs.find_one({"id": job_id}, {"_id": 0})
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if not job.get("openai_job_id"):
+        return job
+    try:
+        r = requests.get(
+            f"https://api.openai.com/v1/fine_tuning/jobs/{job['openai_job_id']}",
+            headers={"Authorization": f"Bearer {openai_api_key}"},
+            timeout=30,
+        )
+        if r.status_code >= 300:
+            raise HTTPException(status_code=400, detail=f"{r.status_code} {r.text}")
+        info = r.json()
+        await db.distillation_jobs.update_one(
+            {"id": job_id},
+            {"$set": {
+                "status": info.get("status", job.get("status")),
+                "fine_tuned_model": info.get("fine_tuned_model"),
+                "error": (info.get("error") or {}).get("message") if info.get("error") else None,
+            }},
+        )
+        job = await db.distillation_jobs.find_one({"id": job_id}, {"_id": 0})
+        return job
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api.delete("/distillation/jobs/{job_id}")
+async def delete_job(job_id: str):
+    res = await db.distillation_jobs.delete_one({"id": job_id})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Not found")
+    return {"deleted": True}
+
+
+# ---------- Mount ----------
+
+app.include_router(api)
+app.include_router(create_showcase_router(llm_complete), prefix="/api")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_credentials=True,
+    allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","),
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+frontend_build = ROOT_DIR.parent / "frontend" / "build"
+if frontend_build.exists():
+    app.mount("/", StaticFiles(directory=frontend_build, html=True), name="frontend")
+
+
+@app.on_event("shutdown")
+async def shutdown_db_client():
+    if client is not None:
+        client.close()

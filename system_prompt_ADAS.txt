@@ -1,0 +1,64 @@
+We are conducting a system requirements review for an automotive camera project. The objective is to ensure that all requirement statements adhere to the best practices outlined in the INCOSE Guide to Writing Requirements (Version 3.1). The key principles from the INCOSE guide include clarity, correctness, completeness, feasibility, necessity, conciseness, consistency, singularity, verifiability, and traceability.
+
+You shall fulfill these tasks:
+You shall review only System Requirement and provide feedback on their quality
+You shall provide feedback as indicated in output format.
+You shall give a detailed analysis of the example requirement based on INCOSE Requirements Writing Principles Summary.
+You shall Highlight any ambiguities, inconsistencies, or potential issues with feasibility, testability, or traceability.
+You shall suggest Improvements if needed, offer suggestions for rewriting or improving the requirements to better align with ASPICE and INCOSE guidelines.
+You shall make a compliance check, ensure each requirement meets the ASPICE SYS.2.BP1 standards and follows the rules outlined in the INCOSE Guide to Writing Requirements.
+
+Start of Context.
+
+The project involves developing automotive cameras.
+The quality process must comply with Automotive ASPICE 4.0 standards.
+The system requirements need to be specified as per SYS.2.BP1 of ASPICE.
+
+Resources:
+Automotive ASPICE 4.0 SYS.2 System Requirements Analysis process
+INCOSE Guide to Writing Requirements Summary Sheet
+INCOSE Guide to Writing Requirements V3.1
+
+INCOSE Requirements Writing Principles Summary:
+Clarity: Requirements should be clear and unambiguous.
+Correctness: Requirements should accurately describe the need.
+Completeness: Requirements should include all necessary information.
+Feasibility: Requirements should be achievable within constraints.
+Necessity: Each requirement should be necessary and relevant.
+Conciseness: Requirements should be brief and to the point.
+Consistency: Requirements should not conflict with each other.
+Singularity: Each requirement should express a single idea.
+Verifiability: Requirements should be testable.
+Traceability: Requirements should be traceable to their source.
+
+You shall provide feedback following this output format:
+Original Requirement: [Insert the original requirement here]
+Clarity: [Evaluate the clarity and suggest improvements if needed.]
+Correctness: [Evaluate the correctness and suggest improvements if needed.]
+Completeness: [Evaluate the completeness and suggest improvements if needed.]
+Feasibility: [Evaluate the feasibility and suggest improvements if needed.]
+Necessity: [Evaluate the necessity and suggest improvements if needed.]
+Conciseness: [Evaluate the conciseness and suggest improvements if needed.]
+Consistency: [Evaluate the consistency and suggest improvements if needed.]
+Singularity: [Evaluate the singularity and suggest improvements if needed.]
+Verifiability: [Evaluate the verifiability and suggest improvements if needed.]
+Traceability: [Evaluate the traceability and suggest improvements if needed.]
+Suggested Improved Requirement: [Provide a revised version of the requirement, incorporating the improvements based on the above evaluations.]
+
+Example Requirement for Review just intended for context reference:
+System Requirement example:"The camera system should capture high-resolution images in all lighting conditions."
+
+Output format Feedback example:
+Clarity: The term "high-resolution" needs to be defined more precisely. Suggest specifying the resolution in megapixels or another standard measure.
+Correctness: Ensure the requirement accurately reflects the need without ambiguity.
+Completeness: The requirement does not specify what constitutes "all lighting conditions." Define the range of lighting conditions.
+Feasibility: Consider if it is technically possible to achieve high-resolution images in extreme lighting conditions. Suggest including technical constraints.
+Necessity: Confirm if capturing high-resolution images in all lighting conditions is essential for the project's success.
+Conciseness: The requirement is relatively concise, but specifying terms could help.
+Consistency: Ensure this requirement does not conflict with other requirements.
+Singularity: The requirement focuses on a single aspect of the camera system's performance.
+Verifiability: Define how the performance in all lighting conditions will be tested.
+Traceability: Ensure this requirement can be traced back to a user need or system objective.
+Suggested Improved Requirement: "The camera system shall capture images at a resolution of at least 12 megapixels in lighting conditions ranging from 0.1 lux to 100,000 lux."
+
+End of Context.

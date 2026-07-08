@@ -1,0 +1,251 @@
+import tempfile
+import time
+import unittest
+from pathlib import Path
+
+from backend.showcase import (
+    IndexCoordinator,
+    ShowcaseRequirement,
+    ShowcaseStore,
+    broad_summary_sources,
+    build_summary_context,
+    compact_text,
+    cosine_distance,
+    fallback_summary,
+    extract_quantities,
+    parse_import,
+    ranked_matches,
+    select_summary_sources,
+)
+
+
+class ShowcaseStoreTests(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.store = ShowcaseStore(Path(self.temp_dir.name) / "showcase.db")
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_replace_persists_and_only_invalidates_changed_rows(self):
+        rows = [
+            ShowcaseRequirement(id="REQ-001", text="The system shall encrypt data."),
+            ShowcaseRequirement(id="REQ-002", text="The system shall log failures."),
+        ]
+        saved = self.store.replace_requirements(rows)
+        self.assertEqual(2, len(saved))
+        self.store.save_embeddings(
+            "test-embed",
+            saved,
+            [[1.0, 0.0], [0.0, 1.0]],
+        )
+        self.assertEqual(2, self.store.counts("test-embed")["indexed"])
+
+        changed = [
+            ShowcaseRequirement(id="REQ-001", text="The system shall encrypt stored data."),
+            ShowcaseRequirement(id="REQ-002", text="The system shall log failures."),
+        ]
+        self.store.replace_requirements(changed)
+        stale = self.store.stale_requirements("test-embed")
+        self.assertEqual(["REQ-001"], [item["id"] for item in stale])
+
+    def test_background_indexer_builds_vectors(self):
+        self.store.replace_requirements(
+            [
+                ShowcaseRequirement(id="REQ-001", text="security encryption"),
+                ShowcaseRequirement(id="REQ-002", text="response performance"),
+            ]
+        )
+
+        def fake_embedder(_url, _model, texts):
+            return [
+                [1.0, 0.0] if "security" in text else [0.0, 1.0]
+                for text in texts
+            ]
+
+        indexer = IndexCoordinator(self.store, embedder=fake_embedder)
+        indexer.schedule("test-embed", "http://ollama")
+        deadline = time.time() + 2
+        while indexer.status()["state"] == "indexing" and time.time() < deadline:
+            time.sleep(0.01)
+
+        status = indexer.status()
+        self.assertEqual("ready", status["state"])
+        self.assertEqual(2, status["indexed"])
+        indexed = self.store.indexed_requirements("test-embed")
+        query = [0.9, 0.1]
+        ranked = sorted(indexed, key=lambda row: cosine_distance(query, row["vector"]))
+        self.assertEqual("REQ-001", ranked[0]["id"])
+
+    def test_json_and_csv_import(self):
+        json_rows = parse_import(
+            "requirements.json",
+            b'{"requirements":[{"id":"REQ-A","text":"Alpha"}]}',
+        )
+        csv_rows = parse_import(
+            "requirements.csv",
+            b"id,requirement,source\nREQ-B,Beta,System spec\n",
+        )
+        self.assertEqual("REQ-A", json_rows[0].id)
+        self.assertEqual("REQ-B", csv_rows[0].id)
+        self.assertEqual("System spec", csv_rows[0].source)
+
+    def test_ranked_matches_discards_weak_context(self):
+        indexed = [
+            {"id": "REQ-001", "text": "A", "source": None, "vector": [1.0, 0.0]},
+            {"id": "REQ-002", "text": "B", "source": None, "vector": [0.97, 0.25]},
+            {"id": "REQ-003", "text": "C", "source": None, "vector": [0.0, 1.0]},
+        ]
+        result = ranked_matches(indexed, [1.0, 0.0], min_similarity=0.30)
+
+        self.assertEqual(["REQ-001", "REQ-002"], [item["id"] for item in result["matches"]])
+        self.assertEqual(1, result["discarded"])
+        self.assertGreaterEqual(result["matches"][0]["score"], 0.40)
+
+    def test_hybrid_ranking_prefers_parameter_matches(self):
+        indexed = [
+            {
+                "id": "REQ-073",
+                "text": "In degraded mode, the system shall withstand a nominal current of 1A.",
+                "source": None,
+                "vector": [1.0, 0.0],
+            },
+            {
+                "id": "PBDU-ELEC-100",
+                "text": "The PDU shall withstand 20A nominal current during 100s.",
+                "source": None,
+                "vector": [0.99, 0.01],
+            },
+            {
+                "id": "PBDU-ELEC-001",
+                "text": "The PBDU shall operate from a nominal 12 V vehicle electrical supply.",
+                "source": None,
+                "vector": [0.98, 0.02],
+            },
+            {
+                "id": "PBDU-MGMT-001",
+                "text": "Each system requirement shall have a unique identifier.",
+                "source": None,
+                "vector": [0.97, 0.03],
+            },
+        ]
+
+        result = ranked_matches(
+            indexed,
+            [1.0, 0.0],
+            query="What nominal current shall the system withstand?",
+            min_similarity=0.30,
+        )
+
+        ids = [item["id"] for item in result["matches"]]
+        self.assertEqual(["REQ-073", "PBDU-ELEC-100"], ids)
+        self.assertEqual(2, result["discarded"])
+
+    def test_summary_context_is_bounded_for_pi_performance(self):
+        matches = [
+            {
+                "id": f"REQ-{index:03d}",
+                "text": "The requirement contains a very long explanation. " * 20,
+                "score": 1.0 - index * 0.01,
+            }
+            for index in range(8)
+        ]
+
+        sources = select_summary_sources(matches, limit=4)
+        context = build_summary_context(sources)
+
+        self.assertEqual(4, len(sources))
+        self.assertLess(len(context), 1200)
+        self.assertIn("REQ-000", context)
+        self.assertNotIn("REQ-004", context)
+
+    def test_fallback_summary_cites_sources_without_llm(self):
+        answer = fallback_summary(
+            "What current is supported?",
+            [
+                {"id": "REQ-001", "text": "The system shall withstand 1A nominal current."},
+                {"id": "REQ-002", "text": "The system shall withstand 20A current during 100s."},
+            ],
+            warning="timeout",
+        )
+
+        self.assertIn("REQ-001", answer)
+        self.assertIn("REQ-002", answer)
+        self.assertIn("no single unique current value", answer.lower())
+
+    def test_fallback_summary_synthesizes_non_unique_current_values(self):
+        answer = fallback_summary(
+            "What is the nominal current?",
+            [
+                {"id": "REQ-073", "text": "In degraded mode, the system shall withstand a nominal current of 1A."},
+                {"id": "PBDU-ELEC-100", "text": "The PDU shall withstand 20A nominal current during 100s."},
+            ],
+        )
+
+        self.assertIn("no single unique current value", answer.lower())
+        self.assertIn("1A", answer)
+        self.assertIn("20A", answer)
+        self.assertIn("REQ-073", answer)
+
+    def test_extract_quantities_keeps_value_and_unit(self):
+        quantities = extract_quantities("The PDU shall withstand 20A nominal current during 100s.")
+        self.assertEqual(["20A", "100s"], [quantity["text"] for quantity in quantities])
+
+    def test_compact_text_limits_long_requirements(self):
+        self.assertEqual("short text", compact_text("short   text", limit=20))
+        self.assertLessEqual(len(compact_text("x" * 500, limit=30)), 30)
+
+    def test_broad_summary_prefers_product_features_over_meta_requirements(self):
+        indexed = [
+            {
+                "id": "PBDU-MGMT-001",
+                "text": "Each system requirement shall have a unique identifier.",
+                "source": None,
+                "vector": [1.0, 0.0],
+            },
+            {
+                "id": "PBDU-TRACE-001",
+                "text": "Each requirement shall be traceable to a stakeholder need.",
+                "source": None,
+                "vector": [0.99, 0.01],
+            },
+            {
+                "id": "PBDU-ELEC-003",
+                "text": "The PBDU shall protect its power outputs against short-circuit conditions.",
+                "source": None,
+                "vector": [0.90, 0.10],
+            },
+            {
+                "id": "PBDU-VI-003",
+                "text": "The PBDU shall measure the current consumed by each controlled power load channel.",
+                "source": None,
+                "vector": [0.89, 0.11],
+            },
+            {
+                "id": "PBDU-ELEC-001",
+                "text": "The PBDU shall operate from a nominal 12 V vehicle electrical supply.",
+                "source": None,
+                "vector": [0.88, 0.12],
+            },
+        ]
+
+        result = broad_summary_sources(
+            indexed,
+            [1.0, 0.0],
+            limit=3,
+        )
+        ids = [item["id"] for item in result["matches"]]
+        answer = fallback_summary(
+            "Explain the main features of the system under development",
+            result["matches"],
+        )
+
+        self.assertIn("PBDU-ELEC-003", ids)
+        self.assertIn("PBDU-VI-003", ids)
+        self.assertNotIn("PBDU-MGMT-001", ids)
+        self.assertIn("main product capabilities", answer)
+        self.assertIn("short-circuit", answer)
+
+
+if __name__ == "__main__":
+    unittest.main()

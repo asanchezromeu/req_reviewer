@@ -1,0 +1,54 @@
+{
+  "requirements": [
+    {
+      "id": "REQ-CAM-004",
+      "domain": "ADAS Camera",
+      "component": "Front Camera",
+      "requirement_type": "System Requirement",
+      "asil": "B",
+      "source": "SN-CAM-04",
+      "parents": ["SN-CAM-04"],
+      "text": "The camera system shall provide a valid image stream to the ADAS ECU within 500 ms after ignition-on at supply voltage from 9 V to 16 V."
+    },
+    {
+      "id": "REQ-CAM-005",
+      "domain": "ADAS Camera",
+      "component": "Front Camera",
+      "requirement_type": "System Requirement",
+      "asil": "B",
+      "source": "SN-CAM-04",
+      "parents": ["SN-CAM-04"],
+      "text": "The camera system shall provide the first valid image frame to the ADAS ECU within 2 s after ignition-on."
+    },
+    {
+      "id": "REQ-CAM-006",
+      "domain": "ADAS Camera",
+      "component": "Front Camera",
+      "requirement_type": "System Requirement",
+      "asil": "B",
+      "source": "SN-CAM-05",
+      "parents": ["SN-CAM-05"],
+      "text": "The camera shall not transmit image data when the vehicle speed is greater than 120 km/h."
+    },
+    {
+      "id": "REQ-CAM-007",
+      "domain": "ADAS Camera",
+      "component": "Front Camera",
+      "requirement_type": "System Requirement",
+      "asil": "B",
+      "source": "SN-CAM-05",
+      "parents": ["SN-CAM-05"],
+      "text": "The camera system shall transmit image data continuously while the vehicle speed is between 0 km/h and 200 km/h."
+    },
+    {
+      "id": "REQ-ZC-002",
+      "domain": "Zone Controller",
+      "component": "Power Input",
+      "requirement_type": "System Requirement",
+      "asil": "C",
+      "source": "SN-ZC-01",
+      "parents": ["SN-ZC-01"],
+      "text": "The zone controller shall withstand reverse battery connection."
+    }
+  ]
+}
