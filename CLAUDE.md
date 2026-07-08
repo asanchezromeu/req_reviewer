@@ -4,20 +4,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository overview
 
-This repo contains **three independent implementations** of the same idea (an LLM-assisted
-requirements-quality reviewer for systems engineering, ASPICE SYS.2 / INCOSE style checks), at
-different levels of maturity. They do not share code and are not wired together — know which one
-you're in before editing.
+`SPEC.md` is the forward-looking companion to this file: it defines the target product (an
+API-first requirements-review engine) and the ordered migration plan. When the two disagree about
+direction, `SPEC.md` wins — read it before starting any non-trivial change.
+
+This repo is converging **two independent implementations** into one engine, plus a `legacy/`
+directory holding two frozen prototypes:
 
 | Implementation | Location | Stack | Status |
 |---|---|---|---|
-| **Main app** | `backend/` + `frontend/` | FastAPI + React (CRA/craco, shadcn/radix) | Actively developed, full-featured |
-| Static Ollama prototype | root (`server.mjs`, `public/`, `src/*.mjs`) | Plain Node `http`, no deps, no build | Standalone demo |
-| Streamlit prototype | `main.py`, `req_analysis.py` | Streamlit + pandas | Standalone demo |
+| **Main app / engine** | `backend/` + `frontend/` | FastAPI + React (CRA/craco, shadcn/radix) | Actively developed — the one engine SPEC.md converges on |
+| Node/Ollama prototype | `legacy/node-prototype/` | Plain Node `http`, no deps, no build | Frozen — see `legacy/README.md` |
+| Streamlit prototype | `legacy/streamlit-prototype/` | Streamlit + pandas | Frozen — see `legacy/README.md` |
 
-Test suites, sample data, and templates at the repo root (`tests/`, `test/`, `samples/`,
-`templates/`, `system_prompt_*.txt`, `reviewer-system-prompt.md`) belong to the two prototypes, not
-to `backend/`/`frontend/`.
+`legacy/README.md` documents what each frozen prototype is and exactly what was salvaged from each
+into `backend/` (the heuristic conflict pre-check and the deterministic non-LLM scorer). Do not add
+new features to anything under `legacy/`.
 
 ## Commands
 
@@ -31,7 +33,9 @@ uvicorn backend.server:app --reload --host 0.0.0.0 --port 8000   # run from repo
 Backend tests:
 
 ```bash
-python -m unittest backend.tests.test_showcase_unit -v      # stdlib-only, no server needed
+python -m unittest backend.tests.test_showcase_unit -v          # stdlib-only, no server needed
+python -m unittest backend.tests.test_conflict_precheck -v      # stdlib-only, no server needed
+python -m unittest backend.tests.test_deterministic_review -v   # stdlib-only, no server needed
 pytest backend/tests/test_reqiq_api.py                       # hits a running server (BASE_URL/REACT_APP_BACKEND_URL env, defaults to a hosted preview URL)
 pytest backend/tests/test_reqiq_iter2.py
 ```
@@ -46,18 +50,20 @@ npm run build    # outputs frontend/build; FastAPI auto-serves it from "/" if th
 npm test         # craco test
 ```
 
-### Static Ollama prototype (root)
+### Node/Ollama prototype (frozen, `legacy/node-prototype/`)
 
 ```bash
+cd legacy/node-prototype
 npm start   # runs server.mjs on :3000 (PORT env), serves public/ and proxies review requests to Ollama
-npm test    # node --test, runs test/parse-requirements.test.mjs
+node --test test/parse-requirements.test.mjs   # bare `npm test` finds 0 tests on newer Node — run explicitly
 ```
 
-### Streamlit prototype
+### Streamlit prototype (frozen, `legacy/streamlit-prototype/`)
 
 ```bash
+cd legacy/streamlit-prototype
 streamlit run main.py
-python -m unittest discover tests   # or: pytest tests/test_req_analysis.py
+python -m unittest tests.test_req_analysis -v
 ```
 
 ## Architecture — main app (`backend/` + `frontend/`)
@@ -81,6 +87,10 @@ python -m unittest discover tests   # or: pytest tests/test_req_analysis.py
   `README.md`). During development the frontend runs separately on :3000 instead.
 - `backend/incose_rules.py` holds the INCOSE 8-rule definitions plus the system prompts used for
   individual requirement scoring, set-level consistency checks, and the plain-language summarizer.
+- `backend/conflict_precheck.py` and `backend/deterministic_review.py` are standalone, tested
+  utilities salvaged from the frozen prototypes (see `legacy/README.md`) — a heuristic conflict
+  pre-check and a non-LLM deterministic scorer/parser, respectively. Neither is wired into any route
+  yet; that wiring is future work.
 
 **`backend/showcase.py`** is a self-contained module (its own SQLite store, embeddings, and search
 ranking) for the "Raspberry Pi showcase" workspace described in `README.md`:
@@ -112,7 +122,7 @@ ranking) for the "Raspberry Pi showcase" workspace described in `README.md`:
 - `REACT_APP_BACKEND_URL` (frontend env) sets the API base URL; empty means same-origin (production
   mode where FastAPI serves the built frontend).
 
-## Architecture — static Ollama prototype (root)
+## Architecture — Node/Ollama prototype (frozen, `legacy/node-prototype/`)
 
 `server.mjs` is a dependency-free Node `http` server: serves `public/` (vanilla JS/HTML/CSS SPA) and
 handles `POST /api/review` by calling Ollama's `/api/chat` directly with `reviewer-system-prompt.md`
@@ -121,19 +131,24 @@ as the system prompt and `format: "json"`. Two helper modules in `src/`:
 - `src/conflict-precheck.mjs` — heuristic pass (`findConflictCandidates`) that flags likely
   conflicting requirement pairs by regex-based positive/negative pattern matching before the LLM
   ever sees them; these are passed to the model as mandatory `conflictCandidates` to check, and
-  `mergeCandidateConflicts` reconciles the LLM's output with them afterward.
+  `mergeCandidateConflicts` reconciles the LLM's output with them afterward. Ported to
+  `backend/conflict_precheck.py`.
 - `src/review-contract.mjs` — `validateReviewPayload` enforces/repairs the JSON schema the LLM is
   expected to return (per-requirement scores, conflicts list) against the actual input requirements.
+  Not yet ported; `SPEC.md` calls for generalizing this into a Python "structured LLM I/O contract"
+  module.
 
-## Architecture — Streamlit prototype
+## Architecture — Streamlit prototype (frozen, `legacy/streamlit-prototype/`)
 
 `req_analysis.py` implements deterministic (non-LLM) requirement parsing and scoring
-(`parse_requirements`, `review_requirements`) — this is the baseline. `main.py` renders this in
-Streamlit and, if "Use Ollama refinement" is checked, sends one batched Ollama chat call (system
-prompt chosen from `PROMPTS` — `system_prompt_ZC.txt` for Zone Controller or `system_prompt_ADAS.txt`
-for ADAS camera context) to refine scores/conflicts. `_merge_reviews`/`_merge_conflicts` guard
-against a malformed or incomplete LLM response by falling back to the deterministic baseline
-whenever the returned requirement IDs don't exactly match the input set.
+(`parse_requirements`, `review_requirements`) — this is the baseline, ported to
+`backend/deterministic_review.py`. `main.py` renders this in Streamlit and, if "Use Ollama
+refinement" is checked, sends one batched Ollama chat call (system prompt chosen from `PROMPTS` —
+`system_prompt_ZC.txt` for Zone Controller or `system_prompt_ADAS.txt` for ADAS camera context) to
+refine scores/conflicts. `_merge_reviews`/`_merge_conflicts` guard against a malformed or incomplete
+LLM response by falling back to the deterministic baseline whenever the returned requirement IDs
+don't exactly match the input set — this specific reconciliation logic was not separately ported
+(see `legacy/README.md` for why).
 
 ## Environment variables
 
@@ -143,9 +158,4 @@ Backend (`backend/.env`, see `backend/.env.example`): `OLLAMA_URL`, `OLLAMA_MODE
 
 Frontend: `REACT_APP_BACKEND_URL`.
 
-Root prototype: `PORT`, `OLLAMA_URL`, `OLLAMA_MODEL`.
-
-## Notes
-
-- This directory is not a git repository (no `.git`). Do not assume `git` commands will work unless
-  the user has initialized one.
+Node prototype (`legacy/node-prototype/`): `PORT`, `OLLAMA_URL`, `OLLAMA_MODEL`.
