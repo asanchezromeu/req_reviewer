@@ -4,7 +4,7 @@ ReqFind is a lightweight local requirements workspace built for an Ollama demo o
 Raspberry Pi 5. It provides:
 
 - JSON and CSV import plus direct requirement editing.
-- SQLite persistence in `backend/data/showcase.db`.
+- SQLite persistence in `backend/data/requirements.db`.
 - Background embedding refresh after each save.
 - Requirement mode: returns only the closest semantic match.
 - Summary mode: retrieves the 10 closest requirements and asks a small local LLM for an
@@ -58,7 +58,9 @@ During development, run `npm start` in `frontend` and use port 3000.
 - `OLLAMA_URL`: defaults to `http://localhost:11434`.
 - `OLLAMA_MODEL`: defaults to `gemma3:1b`.
 - `OLLAMA_EMBED_MODEL`: defaults to `embeddinggemma`.
-- `SHOWCASE_DB_PATH`: overrides the local SQLite file.
+- `REQUIREMENTS_DB_PATH`: overrides the local SQLite file (defaults to `backend/data/requirements.db`).
+- `API_KEYS`: comma-separated keys checked against the `Authorization: Bearer` header on all
+  `/api/v1/*` routes. Leave unset to disable auth for local development.
 
 The runtime settings can also be changed from the expandable settings section in the UI.
 
@@ -70,8 +72,8 @@ JSON accepts a list or an object with a `requirements` list. CSV accepts `text`,
 
 ## Tests
 
-The showcase unit tests use only the Python standard library:
+The retrieval unit tests use only the Python standard library:
 
 ```bash
-python -m unittest backend.tests.test_showcase_unit -v
+python -m unittest backend.tests.test_retrieval -v
 ```

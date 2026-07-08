@@ -33,11 +33,13 @@ uvicorn backend.server:app --reload --host 0.0.0.0 --port 8000   # run from repo
 Backend tests:
 
 ```bash
-python -m unittest backend.tests.test_showcase_unit -v          # stdlib-only, no server needed
+python -m unittest backend.tests.test_retrieval -v              # stdlib-only, no server needed
 python -m unittest backend.tests.test_conflict_precheck -v      # stdlib-only, no server needed
 python -m unittest backend.tests.test_deterministic_review -v   # stdlib-only, no server needed
-pytest backend/tests/test_reqiq_api.py                       # hits a running server (BASE_URL/REACT_APP_BACKEND_URL env, defaults to a hosted preview URL)
+python -m unittest backend.tests.test_auth -v                   # stdlib+fastapi TestClient, no server needed
+pytest backend/tests/test_reqiq_api.py     # hits a running server; BASE_URL/REACT_APP_BACKEND_URL env, defaults to http://localhost:8000
 pytest backend/tests/test_reqiq_iter2.py
+python -m backend.export_openapi           # regenerate backend/openapi.json after any route change
 ```
 
 ### Main app — frontend (React)
@@ -70,18 +72,29 @@ python -m unittest tests.test_req_analysis -v
 
 **`backend/server.py`** is the FastAPI entrypoint. Key things to know:
 
-- Persistence is MongoDB via `motor`, but only if `MONGO_URL` is set. Otherwise `MemoryDatabase` /
-  `MemoryCollection` (defined at the top of the file) provide an in-memory shim with the same async
-  method signatures (`insert_one`, `find`, `update_one`, `delete_one`, ...), so the rest of the code
-  is written once against a Mongo-like interface regardless of backend.
+- **API surface**: every route is registered once (no per-route prefix) and mounted twice — at
+  `/api/v1` (authed, see below) and at `/api` (unauthenticated, `deprecated=True` in the OpenAPI
+  schema — a thin alias kept only until every consumer has moved to v1, per `SPEC.md` Phase 1). The
+  frontend (`frontend/src/lib/api.js`) talks to `/api/v1` only.
+- **Auth**: `backend/auth.py`'s `require_api_key` dependency is applied to the `/api/v1` mounts. It
+  checks `Authorization: Bearer <key>` against the comma-separated `API_KEYS` env var; if `API_KEYS`
+  is unset, auth is disabled with a one-time startup warning (same graceful-degradation spirit as
+  the Mongo-or-memory storage fallback below).
+- **One requirements collection**: there is no "requirement sets" concept anymore. `backend/retrieval.py`'s
+  `RequirementStore` (SQLite) is the single canonical store, shared between the requirements/search/summary
+  routes (defined in `retrieval.py`) and the review/classify/ask routes (defined in `server.py`, which pulls
+  the same store/indexer instances off the router returned by `create_requirements_router` — see the
+  bottom of `server.py`). `POST /review/set`, `POST /classify`, `POST /ask` all operate over *whatever
+  requirements are currently stored*, no id/scoping parameter.
+- Persistence for everything else (system prompts, training examples/datasets, distillation jobs) is
+  MongoDB via `motor`, but only if `MONGO_URL` is set. Otherwise `MemoryDatabase` / `MemoryCollection`
+  (defined at the top of the file) provide an in-memory shim with the same async method signatures
+  (`insert_one`, `find`, `update_one`, `delete_one`, ...), so the rest of the code is written once
+  against a Mongo-like interface regardless of backend.
 - `llm_complete(...)` is the single dispatch point for all LLM calls, branching on a `provider`
   string (`ollama`, `openai`, `anthropic`, `gemini`), each reading its own API key from env
   (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`) / `OLLAMA_URL`. `AVAILABLE_MODELS` lists
-  the selectable model IDs per provider surfaced to the frontend via `GET /api/models`.
-- Two routers are mounted under `/api`: the main `api` router defined inline in `server.py`
-  (uploads, analyze/individual, analyze/set, summarize/ask, classify/set, prompts library,
-  training examples/datasets, distillation jobs), and `create_showcase_router(llm_complete)` from
-  `backend/showcase.py`, mounted at `/api/showcase`.
+  the selectable model IDs per provider surfaced to the frontend via `GET /api/v1/models`.
 - If `frontend/build` exists, it's mounted at `/` via `StaticFiles`, so a built frontend and the API
   are served from the same FastAPI process (the Raspberry Pi deployment model described in
   `README.md`). During development the frontend runs separately on :3000 instead.
@@ -91,21 +104,26 @@ python -m unittest tests.test_req_analysis -v
   utilities salvaged from the frozen prototypes (see `legacy/README.md`) — a heuristic conflict
   pre-check and a non-LLM deterministic scorer/parser, respectively. Neither is wired into any route
   yet; that wiring is future work.
+- `backend/openapi.json` is a committed snapshot of the OpenAPI schema — regenerate it with
+  `python -m backend.export_openapi` whenever routes change.
 
-**`backend/showcase.py`** is a self-contained module (its own SQLite store, embeddings, and search
-ranking) for the "Raspberry Pi showcase" workspace described in `README.md`:
+**`backend/retrieval.py`** (renamed from `showcase.py` in Phase 1 — this is now "the" requirements
+store, not a demo-specific module) is self-contained: its own SQLite store, embeddings, and search
+ranking, exposed via `create_requirements_router(llm_complete)`:
 
-- `ShowcaseStore` persists requirements to SQLite (`backend/data/showcase.db` by default, override
-  with `SHOWCASE_DB_PATH`).
+- `RequirementStore` persists requirements to SQLite (`backend/data/requirements.db` by default,
+  override with `REQUIREMENTS_DB_PATH`).
 - `IndexCoordinator` schedules a background embedding refresh (via Ollama's embeddings API,
   `OLLAMA_EMBED_MODEL`, default `embeddinggemma`) after every save/import, and exposes `status()` for
-  polling from the frontend.
+  polling from the frontend (`GET /index/status`, or trigger one explicitly with `POST /index/rebuild`).
 - Retrieval blends multiple signals — cosine similarity on embeddings plus `keyword_score`,
   `phrase_score`, `structural_score`, and `parameter_penalty` — in `ranked_matches`/`score_requirement`.
-- Two search modes: **requirement mode** returns only the single closest match; **summary mode**
-  (`broad_summary_sources` for broad queries, otherwise the top-N via `select_summary_sources`)
-  retrieves several requirements and asks the local LLM (`ollama_showcase_summary`) for an executive
-  summary, with `fallback_summary`/`summarize_quantitative_answer` as non-LLM fallbacks.
+- Two separate endpoints (previously one endpoint with a `mode` field): `POST /search` returns only
+  the closest matching requirement(s); `POST /summary` (`broad_summary_sources` for broad queries,
+  otherwise the top-N via `select_summary_sources`) retrieves several requirements and asks the local
+  LLM (`ollama_summary`) for an executive summary, with `fallback_summary`/
+  `summarize_quantitative_answer` as non-LLM fallbacks (`degraded: true` in the response when the LLM
+  path wasn't used).
 
 **Frontend** (`frontend/src/`):
 
@@ -113,8 +131,12 @@ ranking) for the "Raspberry Pi showcase" workspace described in `README.md`:
   `components/AnalyzeTab.jsx`, `TailoringTab.jsx`, `TrainingTab.jsx`, `DistillationTab.jsx`, plus the
   standalone `ShowcaseWorkspace.jsx` for the Pi demo.
   `components/AppErrorBoundary.jsx` wraps the whole app.
-- `lib/api.js` is the single axios client; every backend endpoint the frontend calls goes through
-  the `api` object here — check/update this file when adding or renaming backend routes.
+- `lib/api.js` is the single axios client, pointed at `/api/v1` with a `Authorization: Bearer
+  ${REACT_APP_API_KEY}` default header; every backend endpoint the frontend calls goes through the
+  `api` object here — check/update this file when adding or renaming backend routes.
+  `api.searchShowcase(payload)` dispatches to `POST /search` or `POST /summary` based on
+  `payload.mode` and reshapes the response back to the `{mode, ...}` shape
+  `ShowcaseWorkspace.jsx` expects, so that component didn't need to change in Phase 1.
 - `components/ui/` holds generated shadcn/radix primitives (accordion, dialog, dropdown, etc.) —
   treat these as vendored, not hand-written app code.
 - Path alias `@` → `frontend/src` is configured in `craco.config.js` (webpack alias) and
@@ -153,9 +175,11 @@ don't exactly match the input set — this specific reconciliation logic was not
 ## Environment variables
 
 Backend (`backend/.env`, see `backend/.env.example`): `OLLAMA_URL`, `OLLAMA_MODEL`,
-`OLLAMA_EMBED_MODEL`, `SHOWCASE_DB_PATH`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`,
+`OLLAMA_EMBED_MODEL`, `REQUIREMENTS_DB_PATH`, `API_KEYS` (comma-separated, auth disabled if unset),
+`ENABLE_LLM_SUMMARY`, `SUMMARY_TIMEOUT`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`,
 `MONGO_URL`, `DB_NAME`, `CORS_ORIGINS`.
 
-Frontend: `REACT_APP_BACKEND_URL`.
+Frontend (see `frontend/.env.example`): `REACT_APP_BACKEND_URL`, `REACT_APP_API_KEY` (must match one
+of the backend's `API_KEYS`).
 
 Node prototype (`legacy/node-prototype/`): `PORT`, `OLLAMA_URL`, `OLLAMA_MODEL`.

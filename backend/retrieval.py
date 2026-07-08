@@ -1,3 +1,9 @@
+"""Core retrieval module: the canonical requirement store, embedding index, and search/summary logic.
+
+Renamed and unified from the legacy "showcase" module (see SPEC.md Phase 1 — API consolidation).
+This is now THE requirements store for the whole engine: single collection, no "sets" concept.
+"""
+
 import asyncio
 import csv
 import io
@@ -23,21 +29,32 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-class ShowcaseRequirement(BaseModel):
+class Requirement(BaseModel):
     id: str = Field(default_factory=lambda: f"REQ-{uuid.uuid4().hex[:8].upper()}")
     text: str
     source: Optional[str] = None
 
 
-class SaveWorkspaceBody(BaseModel):
-    requirements: List[ShowcaseRequirement]
+class SaveRequirementsBody(BaseModel):
+    requirements: List[Requirement]
     embedding_model: str = "embeddinggemma"
     ollama_url: str = "http://localhost:11434"
 
 
-class ShowcaseSearchBody(BaseModel):
+class IndexRebuildBody(BaseModel):
+    embedding_model: str = "embeddinggemma"
+    ollama_url: str = "http://localhost:11434"
+
+
+class SearchBody(BaseModel):
     query: str
-    mode: str = "requirement"
+    embedding_model: str = "embeddinggemma"
+    ollama_url: str = "http://localhost:11434"
+    min_similarity: float = 0.30
+
+
+class SummaryBody(BaseModel):
+    query: str
     embedding_model: str = "embeddinggemma"
     llm_model: str = "gemma3:1b"
     ollama_url: str = "http://localhost:11434"
@@ -45,7 +62,7 @@ class ShowcaseSearchBody(BaseModel):
     summary_top_k: int = 3
 
 
-class ShowcaseStore:
+class RequirementStore:
     def __init__(self, path: Path):
         self.path = path
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -70,7 +87,7 @@ class ShowcaseStore:
         with self.connect() as connection:
             connection.executescript(
                 """
-                CREATE TABLE IF NOT EXISTS showcase_requirements (
+                CREATE TABLE IF NOT EXISTS requirements (
                     id TEXT PRIMARY KEY,
                     text TEXT NOT NULL,
                     source TEXT,
@@ -78,14 +95,14 @@ class ShowcaseStore:
                     updated_at TEXT NOT NULL
                 );
 
-                CREATE TABLE IF NOT EXISTS showcase_embeddings (
+                CREATE TABLE IF NOT EXISTS requirement_embeddings (
                     requirement_id TEXT PRIMARY KEY,
                     model TEXT NOT NULL,
                     revision INTEGER NOT NULL,
                     vector TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     FOREIGN KEY(requirement_id)
-                        REFERENCES showcase_requirements(id)
+                        REFERENCES requirements(id)
                         ON DELETE CASCADE
                 );
                 """
@@ -96,13 +113,13 @@ class ShowcaseStore:
             rows = connection.execute(
                 """
                 SELECT id, text, source, revision, updated_at
-                FROM showcase_requirements
+                FROM requirements
                 ORDER BY id COLLATE NOCASE
                 """
             ).fetchall()
         return [dict(row) for row in rows]
 
-    def replace_requirements(self, requirements: List[ShowcaseRequirement]) -> List[Dict[str, Any]]:
+    def replace_requirements(self, requirements: List[Requirement]) -> List[Dict[str, Any]]:
         normalized = []
         seen = set()
         for item in requirements:
@@ -120,17 +137,17 @@ class ShowcaseStore:
             existing = {
                 row["id"]: dict(row)
                 for row in connection.execute(
-                    "SELECT id, text, source, revision FROM showcase_requirements"
+                    "SELECT id, text, source, revision FROM requirements"
                 ).fetchall()
             }
             if normalized:
                 placeholders = ",".join("?" for _ in normalized)
                 connection.execute(
-                    f"DELETE FROM showcase_requirements WHERE id NOT IN ({placeholders})",
+                    f"DELETE FROM requirements WHERE id NOT IN ({placeholders})",
                     [row[0] for row in normalized],
                 )
             else:
-                connection.execute("DELETE FROM showcase_requirements")
+                connection.execute("DELETE FROM requirements")
 
             for req_id, text, source in normalized:
                 previous = existing.get(req_id)
@@ -142,7 +159,7 @@ class ShowcaseStore:
                     revision = previous["revision"] + 1
                 connection.execute(
                     """
-                    INSERT INTO showcase_requirements(id, text, source, revision, updated_at)
+                    INSERT INTO requirements(id, text, source, revision, updated_at)
                     VALUES (?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
                         text = excluded.text,
@@ -159,8 +176,8 @@ class ShowcaseStore:
             rows = connection.execute(
                 """
                 SELECT r.id, r.text, r.source, r.revision
-                FROM showcase_requirements r
-                LEFT JOIN showcase_embeddings e ON e.requirement_id = r.id
+                FROM requirements r
+                LEFT JOIN requirement_embeddings e ON e.requirement_id = r.id
                 WHERE e.requirement_id IS NULL
                    OR e.model != ?
                    OR e.revision != r.revision
@@ -182,14 +199,14 @@ class ShowcaseStore:
         with self.connect() as connection:
             for requirement, vector in zip(requirements, vectors):
                 current = connection.execute(
-                    "SELECT revision FROM showcase_requirements WHERE id = ?",
+                    "SELECT revision FROM requirements WHERE id = ?",
                     (requirement["id"],),
                 ).fetchone()
                 if current is None or current["revision"] != requirement["revision"]:
                     continue
                 connection.execute(
                     """
-                    INSERT INTO showcase_embeddings(
+                    INSERT INTO requirement_embeddings(
                         requirement_id, model, revision, vector, updated_at
                     )
                     VALUES (?, ?, ?, ?, ?)
@@ -213,8 +230,8 @@ class ShowcaseStore:
             rows = connection.execute(
                 """
                 SELECT r.id, r.text, r.source, e.vector
-                FROM showcase_requirements r
-                JOIN showcase_embeddings e ON e.requirement_id = r.id
+                FROM requirements r
+                JOIN requirement_embeddings e ON e.requirement_id = r.id
                 WHERE e.model = ? AND e.revision = r.revision
                 """,
                 (model,),
@@ -232,13 +249,13 @@ class ShowcaseStore:
     def counts(self, model: str) -> Dict[str, int]:
         with self.connect() as connection:
             total = connection.execute(
-                "SELECT COUNT(*) FROM showcase_requirements"
+                "SELECT COUNT(*) FROM requirements"
             ).fetchone()[0]
             indexed = connection.execute(
                 """
                 SELECT COUNT(*)
-                FROM showcase_requirements r
-                JOIN showcase_embeddings e ON e.requirement_id = r.id
+                FROM requirements r
+                JOIN requirement_embeddings e ON e.requirement_id = r.id
                 WHERE e.model = ? AND e.revision = r.revision
                 """,
                 (model,),
@@ -582,7 +599,7 @@ def broad_summary_sources(
 class IndexCoordinator:
     def __init__(
         self,
-        store: ShowcaseStore,
+        store: RequirementStore,
         embedder: Callable[[str, str, List[str]], List[List[float]]] = ollama_embed,
     ):
         self.store = store
@@ -602,7 +619,7 @@ class IndexCoordinator:
             if self.running:
                 return
             self.running = True
-            threading.Thread(target=self._run, daemon=True, name="showcase-indexer").start()
+            threading.Thread(target=self._run, daemon=True, name="requirement-indexer").start()
 
     def _run(self) -> None:
         try:
@@ -649,9 +666,9 @@ class IndexCoordinator:
         }
 
 
-def parse_import(filename: str, content: bytes) -> List[ShowcaseRequirement]:
+def parse_import(filename: str, content: bytes) -> List[Requirement]:
     text = content.decode("utf-8-sig", errors="ignore")
-    items: List[ShowcaseRequirement] = []
+    items: List[Requirement] = []
     if (filename or "").lower().endswith(".json"):
         data = json.loads(text)
         if isinstance(data, dict):
@@ -660,10 +677,10 @@ def parse_import(filename: str, content: bytes) -> List[ShowcaseRequirement]:
             raise ValueError("JSON must be a list or an object with a requirements list")
         for index, row in enumerate(data, start=1):
             if isinstance(row, str):
-                items.append(ShowcaseRequirement(id=f"REQ-{index:03d}", text=row))
+                items.append(Requirement(id=f"REQ-{index:03d}", text=row))
             elif isinstance(row, dict):
                 items.append(
-                    ShowcaseRequirement(
+                    Requirement(
                         id=str(row.get("id") or row.get("requirement_id") or f"REQ-{index:03d}"),
                         text=str(
                             row.get("text")
@@ -690,7 +707,7 @@ def parse_import(filename: str, content: bytes) -> List[ShowcaseRequirement]:
         source_column = columns.get("source")
         for index, row in enumerate(reader, start=1):
             items.append(
-                ShowcaseRequirement(
+                Requirement(
                     id=str(row.get(id_column) or f"REQ-{index:03d}") if id_column else f"REQ-{index:03d}",
                     text=str(row.get(text_column) or ""),
                     source=str(row.get(source_column) or "") if source_column else None,
@@ -818,7 +835,7 @@ def summarize_quantitative_answer(query: str, sources: List[Dict[str, Any]]) -> 
     )
 
 
-def ollama_showcase_summary(
+def ollama_summary(
     url: str,
     model: str,
     question: str,
@@ -861,16 +878,44 @@ def ollama_showcase_summary(
     return str((response.json().get("message") or {}).get("content") or "").strip()
 
 
-def create_showcase_router(
+async def _embed_query(
+    store: RequirementStore,
+    indexer: "IndexCoordinator",
+    query: str,
+    embedding_model: str,
+    ollama_url: str,
+    min_similarity: float,
+):
+    query = query.strip()
+    if not query:
+        raise HTTPException(status_code=400, detail="Enter a search question")
+
+    indexed = await asyncio.to_thread(store.indexed_requirements, embedding_model)
+    if not indexed:
+        status = indexer.status()
+        detail = status.get("error") or "The requirement index is not ready yet"
+        raise HTTPException(status_code=409, detail=detail)
+    try:
+        query_vectors = await asyncio.to_thread(
+            ollama_embed, ollama_url, embedding_model, [query],
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Embedding query failed: {exc}") from exc
+
+    ranking = ranked_matches(indexed, query_vectors[0], query, min_similarity)
+    return query, indexed, query_vectors[0], ranking
+
+
+def create_requirements_router(
     llm_complete: Callable[..., Awaitable[str]],
     database_path: Optional[Path] = None,
 ) -> APIRouter:
-    store = ShowcaseStore(
+    store = RequirementStore(
         database_path
-        or Path(os.environ.get("SHOWCASE_DB_PATH", Path(__file__).parent / "data" / "showcase.db"))
+        or Path(os.environ.get("REQUIREMENTS_DB_PATH", Path(__file__).parent / "data" / "requirements.db"))
     )
     indexer = IndexCoordinator(store)
-    router = APIRouter(prefix="/showcase", tags=["showcase"])
+    router = APIRouter(tags=["requirements"])
 
     @router.get("/requirements")
     async def list_requirements():
@@ -880,7 +925,7 @@ def create_showcase_router(
         }
 
     @router.put("/requirements")
-    async def save_requirements(body: SaveWorkspaceBody):
+    async def save_requirements(body: SaveRequirementsBody):
         try:
             requirements = await asyncio.to_thread(
                 store.replace_requirements, body.requirements
@@ -890,7 +935,7 @@ def create_showcase_router(
         indexer.schedule(body.embedding_model, body.ollama_url)
         return {"requirements": requirements, "index": indexer.status()}
 
-    @router.post("/import")
+    @router.post("/requirements/import")
     async def import_requirements(
         file: UploadFile = File(...),
         embedding_model: str = "embeddinggemma",
@@ -908,113 +953,97 @@ def create_showcase_router(
     async def index_status():
         return await asyncio.to_thread(indexer.status)
 
+    @router.post("/index/rebuild")
+    async def index_rebuild(body: IndexRebuildBody = IndexRebuildBody()):
+        indexer.schedule(body.embedding_model, body.ollama_url)
+        return await asyncio.to_thread(indexer.status)
+
     @router.post("/search")
-    async def search(body: ShowcaseSearchBody):
-        query = body.query.strip()
-        if not query:
-            raise HTTPException(status_code=400, detail="Enter a search question")
-        if body.mode not in ("requirement", "summary"):
-            raise HTTPException(status_code=400, detail="Mode must be requirement or summary")
+    async def search(body: SearchBody):
+        _, _, _, ranking = await _embed_query(
+            store, indexer, body.query, body.embedding_model, body.ollama_url, body.min_similarity
+        )
+        matches = ranking["matches"]
+        return {
+            "requirements": matches,
+            "requirement": matches[0] if matches else None,
+            "answered": bool(matches),
+            "message": (
+                None
+                if matches
+                else (
+                    "No requirement was similar enough to the query. "
+                    f"Best similarity was {ranking['best_similarity']:.2f}; "
+                    f"minimum is {ranking['threshold']:.2f}."
+                )
+            ),
+            "discarded": ranking["discarded"],
+            "threshold": ranking["threshold"],
+            "best_similarity": ranking["best_similarity"],
+        }
 
-        indexed = await asyncio.to_thread(store.indexed_requirements, body.embedding_model)
-        if not indexed:
-            status = indexer.status()
-            detail = status.get("error") or "The requirement index is not ready yet"
-            raise HTTPException(status_code=409, detail=detail)
-        try:
-            query_vectors = await asyncio.to_thread(
-                ollama_embed,
-                body.ollama_url,
-                body.embedding_model,
-                [query],
-            )
-        except Exception as exc:
-            raise HTTPException(status_code=502, detail=f"Embedding query failed: {exc}") from exc
-
-        ranking = ranked_matches(
-            indexed,
-            query_vectors[0],
-            query,
-            body.min_similarity,
+    @router.post("/summary")
+    async def summary(body: SummaryBody):
+        query, indexed, query_vector, ranking = await _embed_query(
+            store, indexer, body.query, body.embedding_model, body.ollama_url, body.min_similarity
         )
 
-        if body.mode == "requirement":
-            matches = ranking["matches"]
-            return {
-                "mode": "requirement",
-                "requirements": matches,
-                "requirement": matches[0] if matches else None,
-                "message": (
-                    None
-                    if matches
-                    else (
-                        "No requirement was similar enough to the query. "
-                        f"Best similarity was {ranking['best_similarity']:.2f}; "
-                        f"minimum is {ranking['threshold']:.2f}."
-                    )
-                ),
-                "discarded": ranking["discarded"],
-                "threshold": ranking["threshold"],
-                "best_similarity": ranking["best_similarity"],
-            }
-
         if is_broad_summary_query(query):
-            ranking = broad_summary_sources(
-                indexed,
-                query_vectors[0],
-                body.summary_top_k + 3,
-            )
+            ranking = broad_summary_sources(indexed, query_vector, body.summary_top_k + 3)
         matches = ranking["matches"]
         summary_sources = select_summary_sources(matches, body.summary_top_k)
         if not summary_sources:
             return {
-                "mode": "summary",
-                "answer": fallback_summary(query, []),
+                "summary_text": fallback_summary(query, []),
+                "source_ids": [],
                 "sources": [],
                 "discarded": ranking["discarded"],
                 "threshold": ranking["threshold"],
                 "best_similarity": ranking["best_similarity"],
                 "ambiguous": True,
-                "llm_fallback": True,
+                "degraded": True,
             }
 
-        enable_llm_summary = os.environ.get("SHOWCASE_ENABLE_LLM_SUMMARY", "").lower() in (
+        enable_llm_summary = os.environ.get("ENABLE_LLM_SUMMARY", "").lower() in (
             "1",
             "true",
             "yes",
             "on",
         )
         if enable_llm_summary:
-            summary_timeout = int(os.environ.get("SHOWCASE_SUMMARY_TIMEOUT", "12"))
+            summary_timeout = int(os.environ.get("SUMMARY_TIMEOUT", "12"))
             try:
                 answer = await asyncio.to_thread(
-                    ollama_showcase_summary,
+                    ollama_summary,
                     body.ollama_url,
                     body.llm_model,
                     query,
                     summary_sources,
                     summary_timeout,
                 )
-                llm_fallback = False
+                degraded = False
             except Exception as exc:
                 answer = fallback_summary(query, summary_sources, str(exc))
-                llm_fallback = True
+                degraded = True
         else:
             answer = fallback_summary(query, summary_sources)
-            llm_fallback = True
+            degraded = True
 
+        sources = [
+            {key: item[key] for key in ("id", "text", "source", "distance", "similarity", "score", "breakdown")}
+            for item in summary_sources
+        ]
         return {
-            "mode": "summary",
-            "answer": answer,
-            "sources": [
-                {key: item[key] for key in ("id", "text", "source", "distance", "similarity", "score", "breakdown")}
-                for item in summary_sources
-            ],
+            "summary_text": answer,
+            "source_ids": [item["id"] for item in summary_sources],
+            "sources": sources,
             "discarded": ranking["discarded"],
             "threshold": ranking["threshold"],
             "best_similarity": ranking["best_similarity"],
             "ambiguous": len(summary_sources) != 1,
-            "llm_fallback": llm_fallback,
+            "degraded": degraded,
         }
 
+    router.store = store
+    router.indexer = indexer
     return router

@@ -3,34 +3,50 @@ import time
 import unittest
 from pathlib import Path
 
-from backend.showcase import (
-    IndexCoordinator,
-    ShowcaseRequirement,
-    ShowcaseStore,
-    broad_summary_sources,
-    build_summary_context,
-    compact_text,
-    cosine_distance,
-    fallback_summary,
-    extract_quantities,
-    parse_import,
-    ranked_matches,
-    select_summary_sources,
-)
+try:
+    from backend.retrieval import (
+        IndexCoordinator,
+        Requirement,
+        RequirementStore,
+        broad_summary_sources,
+        build_summary_context,
+        compact_text,
+        cosine_distance,
+        fallback_summary,
+        extract_quantities,
+        parse_import,
+        ranked_matches,
+        select_summary_sources,
+    )
+except ImportError:
+    from retrieval import (
+        IndexCoordinator,
+        Requirement,
+        RequirementStore,
+        broad_summary_sources,
+        build_summary_context,
+        compact_text,
+        cosine_distance,
+        fallback_summary,
+        extract_quantities,
+        parse_import,
+        ranked_matches,
+        select_summary_sources,
+    )
 
 
-class ShowcaseStoreTests(unittest.TestCase):
+class RequirementStoreTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.store = ShowcaseStore(Path(self.temp_dir.name) / "showcase.db")
+        self.store = RequirementStore(Path(self.temp_dir.name) / "requirements.db")
 
     def tearDown(self):
         self.temp_dir.cleanup()
 
     def test_replace_persists_and_only_invalidates_changed_rows(self):
         rows = [
-            ShowcaseRequirement(id="REQ-001", text="The system shall encrypt data."),
-            ShowcaseRequirement(id="REQ-002", text="The system shall log failures."),
+            Requirement(id="REQ-001", text="The system shall encrypt data."),
+            Requirement(id="REQ-002", text="The system shall log failures."),
         ]
         saved = self.store.replace_requirements(rows)
         self.assertEqual(2, len(saved))
@@ -42,8 +58,8 @@ class ShowcaseStoreTests(unittest.TestCase):
         self.assertEqual(2, self.store.counts("test-embed")["indexed"])
 
         changed = [
-            ShowcaseRequirement(id="REQ-001", text="The system shall encrypt stored data."),
-            ShowcaseRequirement(id="REQ-002", text="The system shall log failures."),
+            Requirement(id="REQ-001", text="The system shall encrypt stored data."),
+            Requirement(id="REQ-002", text="The system shall log failures."),
         ]
         self.store.replace_requirements(changed)
         stale = self.store.stale_requirements("test-embed")
@@ -52,8 +68,8 @@ class ShowcaseStoreTests(unittest.TestCase):
     def test_background_indexer_builds_vectors(self):
         self.store.replace_requirements(
             [
-                ShowcaseRequirement(id="REQ-001", text="security encryption"),
-                ShowcaseRequirement(id="REQ-002", text="response performance"),
+                Requirement(id="REQ-001", text="security encryption"),
+                Requirement(id="REQ-002", text="response performance"),
             ]
         )
 

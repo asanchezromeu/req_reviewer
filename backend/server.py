@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any
 
 import requests
-from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File, Form
+from fastapi import Depends, FastAPI, APIRouter, HTTPException, UploadFile, File, Form
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
@@ -29,7 +29,8 @@ try:
         CONSISTENCY_SYSTEM_PROMPT,
         SUMMARIZER_SYSTEM_PROMPT,
     )
-    from .showcase import create_showcase_router
+    from .retrieval import create_requirements_router
+    from .auth import require_api_key
 except ImportError:
     from incose_rules import (
         INCOSE_RULES,
@@ -37,7 +38,8 @@ except ImportError:
         CONSISTENCY_SYSTEM_PROMPT,
         SUMMARIZER_SYSTEM_PROMPT,
     )
-    from showcase import create_showcase_router
+    from retrieval import create_requirements_router
+    from auth import require_api_key
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
@@ -92,7 +94,6 @@ class MemoryCollection:
 
 class MemoryDatabase:
     def __init__(self):
-        self.requirement_sets = MemoryCollection()
         self.system_prompts = MemoryCollection()
         self.training_examples = MemoryCollection()
         self.training_datasets = MemoryCollection()
@@ -124,8 +125,8 @@ if mongo_url and AsyncIOMotorClient is not None:
 else:
     db = MemoryDatabase()
     logger.info("Using in-memory storage. Configure MONGO_URL for persistent data.")
-app = FastAPI(title="ReqIQ API")
-api = APIRouter(prefix="/api")
+app = FastAPI(title="ReqIQ Engine", version="1.0.0")
+api = APIRouter()
 
 
 # ---------- Models ----------
@@ -158,28 +159,7 @@ AVAILABLE_MODELS = {
 }
 
 
-class Requirement(BaseModel):
-    id: str
-    text: str
-    source: Optional[str] = None
-
-
-class UploadResponse(BaseModel):
-    set_id: str
-    name: str
-    count: int
-    requirements: List[Requirement]
-
-
-class RequirementSet(BaseModel):
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    name: str
-    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    count: int
-    requirements: List[Requirement]
-
-
-class AnalyzeIndividualBody(BaseModel):
+class ReviewRequirementBody(BaseModel):
     text: str
     requirement_id: Optional[str] = "REQ-X"
     provider: str
@@ -188,8 +168,7 @@ class AnalyzeIndividualBody(BaseModel):
     tailoring_prompt_id: Optional[str] = None
 
 
-class AnalyzeSetBody(BaseModel):
-    set_id: str
+class ReviewSetBody(BaseModel):
     provider: str
     model: str
     ollama_url: Optional[str] = None
@@ -197,7 +176,6 @@ class AnalyzeSetBody(BaseModel):
 
 
 class AskBody(BaseModel):
-    set_id: str
     question: str
     provider: str
     model: str
@@ -234,7 +212,6 @@ class PromptGenerateBody(BaseModel):
 
 
 class ClassifyBody(BaseModel):
-    set_id: str
     provider: str
     model: str
     ollama_url: Optional[str] = None
@@ -412,55 +389,31 @@ def parse_json_strict(text: str) -> Dict[str, Any]:
     return json.loads(t[start : end + 1])
 
 
-def parse_uploaded_requirements(filename: str, content: bytes) -> List[Requirement]:
-    name = (filename or "").lower()
-    text = content.decode("utf-8", errors="ignore")
-    items: List[Requirement] = []
-    if name.endswith(".json"):
-        data = json.loads(text)
-        if isinstance(data, dict) and "requirements" in data:
-            data = data["requirements"]
-        if not isinstance(data, list):
-            raise ValueError("JSON must be an array of requirements or {requirements:[...]}.")
-        for i, row in enumerate(data, start=1):
-            if isinstance(row, str):
-                items.append(Requirement(id=f"REQ-{i:03d}", text=row))
-            elif isinstance(row, dict):
-                rid = str(row.get("id") or row.get("ID") or row.get("req_id") or f"REQ-{i:03d}")
-                rtext = row.get("text") or row.get("requirement") or row.get("description") or ""
-                src = row.get("source") or row.get("Source")
-                items.append(Requirement(id=rid, text=str(rtext), source=src))
-    else:
-        # CSV
-        reader = csv.DictReader(io.StringIO(text))
-        if reader.fieldnames is None:
-            raise ValueError("CSV is empty or missing header.")
-        lowered = {h.lower(): h for h in reader.fieldnames}
-        id_col = lowered.get("id") or lowered.get("req_id") or lowered.get("requirement_id")
-        text_col = lowered.get("text") or lowered.get("requirement") or lowered.get("description")
-        if not text_col:
-            # fall back to first column as text
-            text_col = reader.fieldnames[0]
-        src_col = lowered.get("source")
-        for i, row in enumerate(reader, start=1):
-            rid = str(row.get(id_col)).strip() if id_col else f"REQ-{i:03d}"
-            if not rid:
-                rid = f"REQ-{i:03d}"
-            rtext = str(row.get(text_col, "")).strip()
-            if not rtext:
-                continue
-            src = str(row.get(src_col, "")).strip() if src_col else None
-            items.append(Requirement(id=rid, text=rtext, source=src))
-    if not items:
-        raise ValueError("No requirements found in file.")
-    return items
-
-
 # ---------- Routes ----------
 
 @api.get("/")
 async def root():
-    return {"name": "ReqIQ API", "ok": True}
+    return {"name": "ReqIQ Engine", "ok": True}
+
+
+@api.get("/health")
+async def health():
+    ollama_url = os.environ.get("OLLAMA_URL", "http://localhost:11434")
+
+    def check_ollama() -> Dict[str, Any]:
+        try:
+            response = requests.get(f"{ollama_url.rstrip('/')}/api/tags", timeout=3)
+            response.raise_for_status()
+            return {"reachable": True}
+        except requests.RequestException as exc:
+            return {"reachable": False, "error": str(exc)}
+
+    ollama_status = await asyncio.to_thread(check_ollama)
+    return {
+        "ok": True,
+        "ollama": {"url": ollama_url, **ollama_status},
+        "index": await asyncio.to_thread(requirements_indexer.status),
+    }
 
 
 @api.get("/models")
@@ -502,43 +455,7 @@ async def get_incose_rules():
     return INCOSE_RULES
 
 
-# ----- Requirement sets -----
-
-@api.post("/requirements/upload", response_model=UploadResponse)
-async def upload_requirements(file: UploadFile = File(...), name: Optional[str] = Form(None)):
-    content = await file.read()
-    try:
-        reqs = parse_uploaded_requirements(file.filename, content)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to parse file: {e}")
-    set_obj = RequirementSet(name=name or file.filename, count=len(reqs), requirements=reqs)
-    await db.requirement_sets.insert_one(set_obj.model_dump())
-    return UploadResponse(set_id=set_obj.id, name=set_obj.name, count=set_obj.count, requirements=reqs)
-
-
-@api.get("/requirements/sets")
-async def list_requirement_sets():
-    cursor = db.requirement_sets.find({}, {"_id": 0, "requirements": 0}).sort("created_at", -1)
-    return await cursor.to_list(200)
-
-
-@api.get("/requirements/sets/{set_id}")
-async def get_requirement_set(set_id: str):
-    doc = await db.requirement_sets.find_one({"id": set_id}, {"_id": 0})
-    if not doc:
-        raise HTTPException(status_code=404, detail="Set not found")
-    return doc
-
-
-@api.delete("/requirements/sets/{set_id}")
-async def delete_requirement_set(set_id: str):
-    res = await db.requirement_sets.delete_one({"id": set_id})
-    if res.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Set not found")
-    return {"deleted": True}
-
-
-# ----- Analysis -----
+# ----- Review -----
 
 async def get_tailoring_prefix(tailoring_prompt_id: Optional[str]) -> str:
     if not tailoring_prompt_id:
@@ -581,8 +498,8 @@ async def analyze_one(
         }
 
 
-@api.post("/analyze/individual")
-async def analyze_individual(body: AnalyzeIndividualBody):
+@api.post("/review/requirement")
+async def review_requirement_endpoint(body: ReviewRequirementBody):
     tailoring = await get_tailoring_prefix(body.tailoring_prompt_id)
     return await analyze_one(
         body.provider,
@@ -594,12 +511,11 @@ async def analyze_individual(body: AnalyzeIndividualBody):
     )
 
 
-@api.post("/analyze/set")
-async def analyze_set(body: AnalyzeSetBody):
-    doc = await db.requirement_sets.find_one({"id": body.set_id}, {"_id": 0})
-    if not doc:
-        raise HTTPException(status_code=404, detail="Set not found")
-    requirements = doc.get("requirements", [])
+@api.post("/review/set")
+async def review_set_endpoint(body: ReviewSetBody):
+    requirements = await asyncio.to_thread(requirements_store.list_requirements)
+    if not requirements:
+        raise HTTPException(status_code=409, detail="No requirements are stored yet")
     tailoring = await get_tailoring_prefix(body.tailoring_prompt_id)
 
     # Run per-requirement LLM calls in parallel, bounded concurrency
@@ -648,8 +564,6 @@ async def analyze_set(body: AnalyzeSetBody):
 
     avg = round(sum(r.get("overall_score", 0) for r in results) / max(len(results), 1), 1) if results else 0
     return {
-        "set_id": body.set_id,
-        "set_name": doc.get("name"),
         "average_score": avg,
         "results": results,
         "inconsistencies": consistency.get("inconsistencies", []),
@@ -658,12 +572,11 @@ async def analyze_set(body: AnalyzeSetBody):
     }
 
 
-@api.post("/summarize/ask")
-async def summarize_ask(body: AskBody):
-    doc = await db.requirement_sets.find_one({"id": body.set_id}, {"_id": 0})
-    if not doc:
-        raise HTTPException(status_code=404, detail="Set not found")
-    requirements = doc.get("requirements", [])
+@api.post("/ask")
+async def ask_endpoint(body: AskBody):
+    requirements = await asyncio.to_thread(requirements_store.list_requirements)
+    if not requirements:
+        raise HTTPException(status_code=409, detail="No requirements are stored yet")
     listing = "\n".join([f"[{r['id']}] {r['text']}" for r in requirements])
     tailoring = await get_tailoring_prefix(body.tailoring_prompt_id)
     sys_msg = (tailoring or "") + SUMMARIZER_SYSTEM_PROMPT + "\n\nRequirements set:\n" + listing
@@ -704,12 +617,11 @@ Return ONLY a strict JSON object in this exact shape — no markdown, no comment
 """
 
 
-@api.post("/classify/set")
-async def classify_set(body: ClassifyBody):
-    doc = await db.requirement_sets.find_one({"id": body.set_id}, {"_id": 0})
-    if not doc:
-        raise HTTPException(status_code=404, detail="Set not found")
-    requirements = doc.get("requirements", [])
+@api.post("/classify")
+async def classify_endpoint(body: ClassifyBody):
+    requirements = await asyncio.to_thread(requirements_store.list_requirements)
+    if not requirements:
+        raise HTTPException(status_code=409, detail="No requirements are stored yet")
 
     user_system_prompt = (body.system_prompt or "").strip()
     categories = list(body.categories or [])
@@ -762,8 +674,6 @@ async def classify_set(body: ClassifyBody):
         dist[cat] = dist.get(cat, 0) + 1
 
     return {
-        "set_id": body.set_id,
-        "set_name": doc.get("name"),
         "categories": categories,
         "results": enriched,
         "distribution": dist,
@@ -1099,8 +1009,18 @@ async def delete_job(job_id: str):
 
 # ---------- Mount ----------
 
-app.include_router(api)
-app.include_router(create_showcase_router(llm_complete), prefix="/api")
+requirements_router = create_requirements_router(llm_complete)
+requirements_store = requirements_router.store
+requirements_indexer = requirements_router.indexer
+
+# /api/v1 is the authed, versioned surface. /api is a thin deprecated alias
+# (same routers, no auth) kept only until every consumer has switched to v1 —
+# see SPEC.md Phase 1.
+app.include_router(api, prefix="/api/v1", dependencies=[Depends(require_api_key)])
+app.include_router(api, prefix="/api", deprecated=True)
+
+app.include_router(requirements_router, prefix="/api/v1", dependencies=[Depends(require_api_key)])
+app.include_router(requirements_router, prefix="/api", deprecated=True)
 
 app.add_middleware(
     CORSMiddleware,

@@ -1,14 +1,13 @@
-"""ReqIQ iteration-2 tests: prompts library (tailoring + classifier), prompt generator, classify/set, tailored analyze."""
+"""ReqIQ iteration-2 tests: prompts library (tailoring + classifier), prompt generator, classify, tailored review."""
 import io
 import json
 import os
-import uuid
 
 import pytest
 import requests
 
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL").rstrip("/")
-API = f"{BASE_URL}/api"
+BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "http://localhost:8000").rstrip("/")
+API = f"{BASE_URL}/api/v1"
 
 LLM_TIMEOUT = 120
 SET_TIMEOUT = 240
@@ -30,14 +29,11 @@ def uploaded_set(session):
         {"id": "REQ-003", "text": "The login page shall provide a 'Forgot password' link."},
         {"id": "REQ-004", "text": "The system shall log all authentication failures to the audit log."},
     ]
-    fd = io.BytesIO(json.dumps(sample).encode("utf-8"))
-    files = {"file": ("TEST_iter2.json", fd, "application/json")}
-    data = {"name": f"TEST_iter2_{uuid.uuid4().hex[:6]}"}
-    r = session.post(f"{API}/requirements/upload", files=files, data=data, timeout=30)
+    r = session.put(f"{API}/requirements", json={"requirements": sample}, timeout=30)
     assert r.status_code == 200, r.text
     body = r.json()
     yield body
-    session.delete(f"{API}/requirements/sets/{body['set_id']}", timeout=20)
+    session.put(f"{API}/requirements", json={"requirements": []}, timeout=20)
 
 
 # ---------- Prompts CRUD: tailoring ----------
@@ -195,14 +191,13 @@ def saved_tailoring_prompt(session):
     session.delete(f"{API}/prompts/{p['id']}", timeout=20)
 
 
-def test_classify_set_with_saved_prompt(session, uploaded_set, saved_classifier_prompt):
+def test_classify_with_saved_prompt(session, uploaded_set, saved_classifier_prompt):
     payload = {
-        "set_id": uploaded_set["set_id"],
         "provider": PROVIDER,
         "model": MODEL,
         "prompt_id": saved_classifier_prompt["id"],
     }
-    r = session.post(f"{API}/classify/set", json=payload, timeout=SET_TIMEOUT)
+    r = session.post(f"{API}/classify", json=payload, timeout=SET_TIMEOUT)
     assert r.status_code == 200, r.text
     data = r.json()
     assert "results" in data and isinstance(data["results"], list)
@@ -225,27 +220,26 @@ def test_classify_set_with_saved_prompt(session, uploaded_set, saved_classifier_
     assert total == len(data["results"]), f"distribution total {total} != results {len(data['results'])}"
 
 
-def test_classify_set_requires_prompt(session, uploaded_set):
-    payload = {"set_id": uploaded_set["set_id"], "provider": PROVIDER, "model": MODEL}
-    r = session.post(f"{API}/classify/set", json=payload, timeout=30)
+def test_classify_requires_prompt(session, uploaded_set):
+    payload = {"provider": PROVIDER, "model": MODEL}
+    r = session.post(f"{API}/classify", json=payload, timeout=30)
     assert r.status_code == 400
     assert "classifier" in r.json().get("detail", "").lower() or "required" in r.json().get("detail", "").lower()
 
 
-def test_classify_set_rejects_tailoring_prompt(session, uploaded_set, saved_tailoring_prompt):
+def test_classify_rejects_tailoring_prompt(session, uploaded_set, saved_tailoring_prompt):
     payload = {
-        "set_id": uploaded_set["set_id"],
         "provider": PROVIDER,
         "model": MODEL,
         "prompt_id": saved_tailoring_prompt["id"],
     }
-    r = session.post(f"{API}/classify/set", json=payload, timeout=30)
+    r = session.post(f"{API}/classify", json=payload, timeout=30)
     assert r.status_code == 400
     assert "classifier" in r.json().get("detail", "").lower()
 
 
-# ---------- Tailored analyze ----------
-def test_analyze_individual_with_tailoring(session, saved_tailoring_prompt):
+# ---------- Tailored review ----------
+def test_review_requirement_with_tailoring(session, saved_tailoring_prompt):
     payload = {
         "text": "The system shall be secure.",
         "requirement_id": "REQ-TAIL-1",
@@ -253,10 +247,10 @@ def test_analyze_individual_with_tailoring(session, saved_tailoring_prompt):
         "model": MODEL,
         "tailoring_prompt_id": saved_tailoring_prompt["id"],
     }
-    r = session.post(f"{API}/analyze/individual", json=payload, timeout=LLM_TIMEOUT)
+    r = session.post(f"{API}/review/requirement", json=payload, timeout=LLM_TIMEOUT)
     assert r.status_code == 200, r.text
     data = r.json()
-    assert "error" not in data, f"tailored analyze errored: {data.get('error')}"
+    assert "error" not in data, f"tailored review errored: {data.get('error')}"
     assert isinstance(data.get("overall_score"), int)
     rules = data.get("rules", {})
     expected = {"necessary", "singular", "unambiguous", "complete",
@@ -264,14 +258,13 @@ def test_analyze_individual_with_tailoring(session, saved_tailoring_prompt):
     assert expected.issubset(set(rules.keys()))
 
 
-def test_analyze_set_with_tailoring(session, uploaded_set, saved_tailoring_prompt):
+def test_review_set_with_tailoring(session, uploaded_set, saved_tailoring_prompt):
     payload = {
-        "set_id": uploaded_set["set_id"],
         "provider": PROVIDER,
         "model": MODEL,
         "tailoring_prompt_id": saved_tailoring_prompt["id"],
     }
-    r = session.post(f"{API}/analyze/set", json=payload, timeout=SET_TIMEOUT)
+    r = session.post(f"{API}/review/set", json=payload, timeout=SET_TIMEOUT)
     assert r.status_code == 200, r.text
     data = r.json()
     assert isinstance(data["results"], list) and len(data["results"]) == len(uploaded_set["requirements"])

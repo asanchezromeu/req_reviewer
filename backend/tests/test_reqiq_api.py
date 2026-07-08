@@ -3,13 +3,12 @@ import io
 import json
 import os
 import time
-import uuid
 
 import pytest
 import requests
 
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://req-distiller.preview.emergentagent.com").rstrip("/")
-API = f"{BASE_URL}/api"
+BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "http://localhost:8000").rstrip("/")
+API = f"{BASE_URL}/api/v1"
 
 LLM_TIMEOUT = 90
 SET_TIMEOUT = 240
@@ -44,7 +43,7 @@ def test_get_incose_rules(session):
     assert len(data) == 8
 
 
-# ---------- Requirements set ----------
+# ---------- Requirements (single unified collection, no more "sets") ----------
 @pytest.fixture(scope="module")
 def uploaded_set(session):
     sample = [
@@ -53,30 +52,23 @@ def uploaded_set(session):
         {"id": "REQ-003", "text": "The system shall support TLS 1.3 for all external traffic and shall reject TLS 1.2 connections."},
         {"id": "REQ-004", "text": "The system shall support TLS 1.2 for all external traffic."},
     ]
-    fd = io.BytesIO(json.dumps(sample).encode("utf-8"))
-    files = {"file": ("TEST_sample.json", fd, "application/json")}
-    data = {"name": f"TEST_set_{uuid.uuid4().hex[:6]}"}
-    r = session.post(f"{API}/requirements/upload", files=files, data=data, timeout=30)
+    payload = {"requirements": sample}
+    r = session.put(f"{API}/requirements", json=payload, timeout=30)
     assert r.status_code == 200, r.text
     body = r.json()
-    assert "set_id" in body
-    assert body["count"] == 4
     assert len(body["requirements"]) == 4
     assert body["requirements"][0]["id"] == "REQ-001"
     yield body
-    # cleanup
-    session.delete(f"{API}/requirements/sets/{body['set_id']}", timeout=20)
+    # cleanup: reset to an empty collection
+    session.put(f"{API}/requirements", json={"requirements": []}, timeout=20)
 
 
-def test_upload_and_list_set(session, uploaded_set):
-    r = session.get(f"{API}/requirements/sets", timeout=20)
+def test_list_requirements(session, uploaded_set):
+    r = session.get(f"{API}/requirements", timeout=20)
     assert r.status_code == 200
-    items = r.json()
-    ids = [i["id"] for i in items]
-    assert uploaded_set["set_id"] in ids
-    # ensure _id is not present
-    for it in items:
-        assert "_id" not in it
+    body = r.json()
+    ids = [i["id"] for i in body["requirements"]]
+    assert "REQ-001" in ids
 
 
 # ---------- Individual analyze ----------
@@ -87,7 +79,7 @@ def test_analyze_individual_ambiguous(session):
         "provider": "openai",
         "model": "gpt-4o-mini",
     }
-    r = session.post(f"{API}/analyze/individual", json=payload, timeout=LLM_TIMEOUT)
+    r = session.post(f"{API}/review/requirement", json=payload, timeout=LLM_TIMEOUT)
     assert r.status_code == 200, r.text
     data = r.json()
     assert "error" not in data, f"LLM analysis errored: {data.get('error')}"
@@ -103,10 +95,10 @@ def test_analyze_individual_ambiguous(session):
         assert "finding" in rules[k]
 
 
-# ---------- Set analyze ----------
-def test_analyze_set(session, uploaded_set):
-    payload = {"set_id": uploaded_set["set_id"], "provider": "openai", "model": "gpt-4o-mini"}
-    r = session.post(f"{API}/analyze/set", json=payload, timeout=SET_TIMEOUT)
+# ---------- Set-level review ----------
+def test_review_set(session, uploaded_set):
+    payload = {"provider": "openai", "model": "gpt-4o-mini"}
+    r = session.post(f"{API}/review/set", json=payload, timeout=SET_TIMEOUT)
     assert r.status_code == 200, r.text
     data = r.json()
     assert "average_score" in data
@@ -118,15 +110,14 @@ def test_analyze_set(session, uploaded_set):
     assert isinstance(data["inconsistencies"], list)
 
 
-# ---------- Summarize ----------
-def test_summarize_ask(session, uploaded_set):
+# ---------- Ask ----------
+def test_ask(session, uploaded_set):
     payload = {
-        "set_id": uploaded_set["set_id"],
         "question": "Summarise the security-related requirements",
         "provider": "openai",
         "model": "gpt-4o-mini",
     }
-    r = session.post(f"{API}/summarize/ask", json=payload, timeout=LLM_TIMEOUT)
+    r = session.post(f"{API}/ask", json=payload, timeout=LLM_TIMEOUT)
     assert r.status_code == 200, r.text
     data = r.json()
     assert isinstance(data.get("answer"), str)

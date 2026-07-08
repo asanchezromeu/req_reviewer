@@ -1,9 +1,13 @@
 import axios from "axios";
 
 const BACKEND_URL = (process.env.REACT_APP_BACKEND_URL || "").replace(/\/$/, "");
-export const API = `${BACKEND_URL}/api`;
+export const API = `${BACKEND_URL}/api/v1`;
+const API_KEY = process.env.REACT_APP_API_KEY || "";
 
-const client = axios.create({ baseURL: API });
+const client = axios.create({
+  baseURL: API,
+  headers: API_KEY ? { Authorization: `Bearer ${API_KEY}` } : {},
+});
 
 export const api = {
   models: () => client.get("/models").then((r) => r.data),
@@ -11,27 +15,16 @@ export const api = {
     client.get("/ollama/models", { params: { url } }).then((r) => r.data),
   incoseRules: () => client.get("/incose/rules").then((r) => r.data),
 
-  // Requirement sets
-  uploadRequirements: (file, name) => {
-    const fd = new FormData();
-    fd.append("file", file);
-    if (name) fd.append("name", name);
-    return client.post("/requirements/upload", fd).then((r) => r.data);
-  },
-  listSets: () => client.get("/requirements/sets").then((r) => r.data),
-  getSet: (id) => client.get(`/requirements/sets/${id}`).then((r) => r.data),
-  deleteSet: (id) => client.delete(`/requirements/sets/${id}`).then((r) => r.data),
-
-  // Raspberry Pi showcase
+  // Requirements (single unified collection + embedding index)
   showcaseRequirements: () =>
-    client.get("/showcase/requirements").then((r) => r.data),
+    client.get("/requirements").then((r) => r.data),
   saveShowcaseRequirements: (payload) =>
-    client.put("/showcase/requirements", payload).then((r) => r.data),
+    client.put("/requirements", payload).then((r) => r.data),
   importShowcaseRequirements: (file, embeddingModel, ollamaUrl) => {
     const fd = new FormData();
     fd.append("file", file);
     return client
-      .post("/showcase/import", fd, {
+      .post("/requirements/import", fd, {
         params: {
           embedding_model: embeddingModel,
           ollama_url: ollamaUrl,
@@ -40,16 +33,38 @@ export const api = {
       .then((r) => r.data);
   },
   showcaseIndexStatus: () =>
-    client.get("/showcase/index/status").then((r) => r.data),
-  searchShowcase: (payload) =>
-    client.post("/showcase/search", payload).then((r) => r.data),
+    client.get("/index/status").then((r) => r.data),
+  searchShowcase: (payload) => {
+    const { mode, ...body } = payload;
+    if (mode === "summary") {
+      return client.post("/summary", body).then((r) => ({
+        mode: "summary",
+        answer: r.data.summary_text,
+        sources: r.data.sources,
+        discarded: r.data.discarded,
+        threshold: r.data.threshold,
+        best_similarity: r.data.best_similarity,
+        ambiguous: r.data.ambiguous,
+        llm_fallback: r.data.degraded,
+      }));
+    }
+    return client.post("/search", body).then((r) => ({
+      mode: "requirement",
+      requirements: r.data.requirements,
+      requirement: r.data.requirement,
+      message: r.data.message,
+      discarded: r.data.discarded,
+      threshold: r.data.threshold,
+      best_similarity: r.data.best_similarity,
+    }));
+  },
 
-  // Analysis
+  // Review / classify / ask (operate on the single current requirements collection)
   analyzeIndividual: (payload) =>
-    client.post("/analyze/individual", payload).then((r) => r.data),
-  analyzeSet: (payload) => client.post("/analyze/set", payload).then((r) => r.data),
-  ask: (payload) => client.post("/summarize/ask", payload).then((r) => r.data),
-  classifySet: (payload) => client.post("/classify/set", payload).then((r) => r.data),
+    client.post("/review/requirement", payload).then((r) => r.data),
+  analyzeSet: (payload) => client.post("/review/set", payload).then((r) => r.data),
+  ask: (payload) => client.post("/ask", payload).then((r) => r.data),
+  classifySet: (payload) => client.post("/classify", payload).then((r) => r.data),
 
   // Prompts library (tailoring + classifier)
   listPrompts: (kind) =>

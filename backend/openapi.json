@@ -1,0 +1,3070 @@
+{
+  "components": {
+    "schemas": {
+      "AskBody": {
+        "properties": {
+          "history": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "History"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "ollama_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ollama Url"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "question": {
+            "title": "Question",
+            "type": "string"
+          },
+          "tailoring_prompt_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tailoring Prompt Id"
+          }
+        },
+        "required": [
+          "question",
+          "provider",
+          "model"
+        ],
+        "title": "AskBody",
+        "type": "object"
+      },
+      "Body_import_requirements_api_requirements_import_post": {
+        "properties": {
+          "file": {
+            "format": "binary",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_import_requirements_api_requirements_import_post",
+        "type": "object"
+      },
+      "Body_import_requirements_api_v1_requirements_import_post": {
+        "properties": {
+          "file": {
+            "format": "binary",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_import_requirements_api_v1_requirements_import_post",
+        "type": "object"
+      },
+      "Body_refresh_job_api_distillation_jobs__job_id__refresh_post": {
+        "properties": {
+          "openai_api_key": {
+            "title": "Openai Api Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "openai_api_key"
+        ],
+        "title": "Body_refresh_job_api_distillation_jobs__job_id__refresh_post",
+        "type": "object"
+      },
+      "Body_refresh_job_api_v1_distillation_jobs__job_id__refresh_post": {
+        "properties": {
+          "openai_api_key": {
+            "title": "Openai Api Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "openai_api_key"
+        ],
+        "title": "Body_refresh_job_api_v1_distillation_jobs__job_id__refresh_post",
+        "type": "object"
+      },
+      "Body_upload_dataset_api_training_datasets_post": {
+        "properties": {
+          "file": {
+            "format": "binary",
+            "title": "File",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_dataset_api_training_datasets_post",
+        "type": "object"
+      },
+      "Body_upload_dataset_api_v1_training_datasets_post": {
+        "properties": {
+          "file": {
+            "format": "binary",
+            "title": "File",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_dataset_api_v1_training_datasets_post",
+        "type": "object"
+      },
+      "ClassifyBody": {
+        "properties": {
+          "categories": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Categories"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "ollama_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ollama Url"
+          },
+          "prompt_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Id"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "system_prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "System Prompt"
+          }
+        },
+        "required": [
+          "provider",
+          "model"
+        ],
+        "title": "ClassifyBody",
+        "type": "object"
+      },
+      "DistillationStartBody": {
+        "properties": {
+          "base_model": {
+            "default": "gpt-4o-mini-2024-07-18",
+            "title": "Base Model",
+            "type": "string"
+          },
+          "dataset_id": {
+            "title": "Dataset Id",
+            "type": "string"
+          },
+          "n_epochs": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": 3,
+            "title": "N Epochs"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "openai_api_key": {
+            "title": "Openai Api Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "dataset_id",
+          "openai_api_key"
+        ],
+        "title": "DistillationStartBody",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "IndexRebuildBody": {
+        "properties": {
+          "embedding_model": {
+            "default": "embeddinggemma",
+            "title": "Embedding Model",
+            "type": "string"
+          },
+          "ollama_url": {
+            "default": "http://localhost:11434",
+            "title": "Ollama Url",
+            "type": "string"
+          }
+        },
+        "title": "IndexRebuildBody",
+        "type": "object"
+      },
+      "PromptGenerateBody": {
+        "properties": {
+          "categories_hint": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Categories Hint"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "ollama_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ollama Url"
+          },
+          "project_description": {
+            "title": "Project Description",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "project_description",
+          "provider",
+          "model"
+        ],
+        "title": "PromptGenerateBody",
+        "type": "object"
+      },
+      "Requirement": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "Requirement",
+        "type": "object"
+      },
+      "ReviewRequirementBody": {
+        "properties": {
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "ollama_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ollama Url"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "requirement_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "REQ-X",
+            "title": "Requirement Id"
+          },
+          "tailoring_prompt_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tailoring Prompt Id"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text",
+          "provider",
+          "model"
+        ],
+        "title": "ReviewRequirementBody",
+        "type": "object"
+      },
+      "ReviewSetBody": {
+        "properties": {
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "ollama_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ollama Url"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "tailoring_prompt_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tailoring Prompt Id"
+          }
+        },
+        "required": [
+          "provider",
+          "model"
+        ],
+        "title": "ReviewSetBody",
+        "type": "object"
+      },
+      "SaveRequirementsBody": {
+        "properties": {
+          "embedding_model": {
+            "default": "embeddinggemma",
+            "title": "Embedding Model",
+            "type": "string"
+          },
+          "ollama_url": {
+            "default": "http://localhost:11434",
+            "title": "Ollama Url",
+            "type": "string"
+          },
+          "requirements": {
+            "items": {
+              "$ref": "#/components/schemas/Requirement"
+            },
+            "title": "Requirements",
+            "type": "array"
+          }
+        },
+        "required": [
+          "requirements"
+        ],
+        "title": "SaveRequirementsBody",
+        "type": "object"
+      },
+      "SearchBody": {
+        "properties": {
+          "embedding_model": {
+            "default": "embeddinggemma",
+            "title": "Embedding Model",
+            "type": "string"
+          },
+          "min_similarity": {
+            "default": 0.3,
+            "title": "Min Similarity",
+            "type": "number"
+          },
+          "ollama_url": {
+            "default": "http://localhost:11434",
+            "title": "Ollama Url",
+            "type": "string"
+          },
+          "query": {
+            "title": "Query",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "title": "SearchBody",
+        "type": "object"
+      },
+      "SummaryBody": {
+        "properties": {
+          "embedding_model": {
+            "default": "embeddinggemma",
+            "title": "Embedding Model",
+            "type": "string"
+          },
+          "llm_model": {
+            "default": "gemma3:1b",
+            "title": "Llm Model",
+            "type": "string"
+          },
+          "min_similarity": {
+            "default": 0.3,
+            "title": "Min Similarity",
+            "type": "number"
+          },
+          "ollama_url": {
+            "default": "http://localhost:11434",
+            "title": "Ollama Url",
+            "type": "string"
+          },
+          "query": {
+            "title": "Query",
+            "type": "string"
+          },
+          "summary_top_k": {
+            "default": 3,
+            "title": "Summary Top K",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "title": "SummaryBody",
+        "type": "object"
+      },
+      "SystemPrompt": {
+        "properties": {
+          "categories": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Categories",
+            "type": "array"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "",
+            "title": "Description"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "system_prompt": {
+            "title": "System Prompt",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "kind",
+          "system_prompt"
+        ],
+        "title": "SystemPrompt",
+        "type": "object"
+      },
+      "SystemPromptCreate": {
+        "properties": {
+          "categories": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Categories",
+            "type": "array"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "",
+            "title": "Description"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "system_prompt": {
+            "title": "System Prompt",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "kind",
+          "system_prompt"
+        ],
+        "title": "SystemPromptCreate",
+        "type": "object"
+      },
+      "TrainingExample": {
+        "properties": {
+          "corrected_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "",
+            "title": "Corrected Text"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "explanation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "",
+            "title": "Explanation"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "requirement_text": {
+            "title": "Requirement Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "requirement_text"
+        ],
+        "title": "TrainingExample",
+        "type": "object"
+      },
+      "TrainingExampleCreate": {
+        "properties": {
+          "corrected_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "",
+            "title": "Corrected Text"
+          },
+          "explanation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "",
+            "title": "Explanation"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "requirement_text": {
+            "title": "Requirement Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "requirement_text"
+        ],
+        "title": "TrainingExampleCreate",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "title": "ReqIQ Engine",
+    "version": "1.0.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/": {
+      "get": {
+        "deprecated": true,
+        "operationId": "root_api__get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Root"
+      }
+    },
+    "/api/ask": {
+      "post": {
+        "deprecated": true,
+        "operationId": "ask_endpoint_api_ask_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AskBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ask Endpoint"
+      }
+    },
+    "/api/classify": {
+      "post": {
+        "deprecated": true,
+        "operationId": "classify_endpoint_api_classify_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClassifyBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Classify Endpoint"
+      }
+    },
+    "/api/distillation/jobs": {
+      "get": {
+        "deprecated": true,
+        "operationId": "list_jobs_api_distillation_jobs_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Jobs"
+      },
+      "post": {
+        "deprecated": true,
+        "operationId": "start_distillation_api_distillation_jobs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DistillationStartBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start Distillation"
+      }
+    },
+    "/api/distillation/jobs/{job_id}": {
+      "delete": {
+        "deprecated": true,
+        "operationId": "delete_job_api_distillation_jobs__job_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Job"
+      }
+    },
+    "/api/distillation/jobs/{job_id}/refresh": {
+      "post": {
+        "deprecated": true,
+        "operationId": "refresh_job_api_distillation_jobs__job_id__refresh_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_refresh_job_api_distillation_jobs__job_id__refresh_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Refresh Job"
+      }
+    },
+    "/api/health": {
+      "get": {
+        "deprecated": true,
+        "operationId": "health_api_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health"
+      }
+    },
+    "/api/incose/rules": {
+      "get": {
+        "deprecated": true,
+        "operationId": "get_incose_rules_api_incose_rules_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Incose Rules"
+      }
+    },
+    "/api/index/rebuild": {
+      "post": {
+        "deprecated": true,
+        "operationId": "index_rebuild_api_index_rebuild_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IndexRebuildBody",
+                "default": {
+                  "embedding_model": "embeddinggemma",
+                  "ollama_url": "http://localhost:11434"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Index Rebuild",
+        "tags": [
+          "requirements"
+        ]
+      }
+    },
+    "/api/index/status": {
+      "get": {
+        "deprecated": true,
+        "operationId": "index_status_api_index_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Index Status",
+        "tags": [
+          "requirements"
+        ]
+      }
+    },
+    "/api/models": {
+      "get": {
+        "deprecated": true,
+        "operationId": "get_models_api_models_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Models"
+      }
+    },
+    "/api/ollama/models": {
+      "get": {
+        "deprecated": true,
+        "operationId": "get_ollama_models_api_ollama_models_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "url",
+            "required": false,
+            "schema": {
+              "default": "http://localhost:11434",
+              "title": "Url",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Ollama Models"
+      }
+    },
+    "/api/prompts": {
+      "get": {
+        "deprecated": true,
+        "operationId": "list_prompts_api_prompts_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Prompts"
+      },
+      "post": {
+        "deprecated": true,
+        "operationId": "create_prompt_api_prompts_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SystemPromptCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemPrompt"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Prompt"
+      }
+    },
+    "/api/prompts/generate": {
+      "post": {
+        "deprecated": true,
+        "operationId": "generate_prompt_api_prompts_generate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PromptGenerateBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Generate Prompt"
+      }
+    },
+    "/api/prompts/{prompt_id}": {
+      "delete": {
+        "deprecated": true,
+        "operationId": "delete_prompt_api_prompts__prompt_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "prompt_id",
+            "required": true,
+            "schema": {
+              "title": "Prompt Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Prompt"
+      },
+      "get": {
+        "deprecated": true,
+        "operationId": "get_prompt_api_prompts__prompt_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "prompt_id",
+            "required": true,
+            "schema": {
+              "title": "Prompt Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Prompt"
+      }
+    },
+    "/api/requirements": {
+      "get": {
+        "deprecated": true,
+        "operationId": "list_requirements_api_requirements_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Requirements",
+        "tags": [
+          "requirements"
+        ]
+      },
+      "put": {
+        "deprecated": true,
+        "operationId": "save_requirements_api_requirements_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveRequirementsBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save Requirements",
+        "tags": [
+          "requirements"
+        ]
+      }
+    },
+    "/api/requirements/import": {
+      "post": {
+        "deprecated": true,
+        "operationId": "import_requirements_api_requirements_import_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "embedding_model",
+            "required": false,
+            "schema": {
+              "default": "embeddinggemma",
+              "title": "Embedding Model",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "ollama_url",
+            "required": false,
+            "schema": {
+              "default": "http://localhost:11434",
+              "title": "Ollama Url",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_import_requirements_api_requirements_import_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Import Requirements",
+        "tags": [
+          "requirements"
+        ]
+      }
+    },
+    "/api/review/requirement": {
+      "post": {
+        "deprecated": true,
+        "operationId": "review_requirement_endpoint_api_review_requirement_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewRequirementBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Review Requirement Endpoint"
+      }
+    },
+    "/api/review/set": {
+      "post": {
+        "deprecated": true,
+        "operationId": "review_set_endpoint_api_review_set_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewSetBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Review Set Endpoint"
+      }
+    },
+    "/api/search": {
+      "post": {
+        "deprecated": true,
+        "operationId": "search_api_search_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SearchBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Search",
+        "tags": [
+          "requirements"
+        ]
+      }
+    },
+    "/api/summary": {
+      "post": {
+        "deprecated": true,
+        "operationId": "summary_api_summary_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SummaryBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Summary",
+        "tags": [
+          "requirements"
+        ]
+      }
+    },
+    "/api/training/datasets": {
+      "get": {
+        "deprecated": true,
+        "operationId": "list_datasets_api_training_datasets_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Datasets"
+      },
+      "post": {
+        "deprecated": true,
+        "operationId": "upload_dataset_api_training_datasets_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_dataset_api_training_datasets_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upload Dataset"
+      }
+    },
+    "/api/training/datasets/{ds_id}": {
+      "delete": {
+        "deprecated": true,
+        "operationId": "delete_dataset_api_training_datasets__ds_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ds_id",
+            "required": true,
+            "schema": {
+              "title": "Ds Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Dataset"
+      },
+      "get": {
+        "deprecated": true,
+        "operationId": "get_dataset_api_training_datasets__ds_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ds_id",
+            "required": true,
+            "schema": {
+              "title": "Ds Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Dataset"
+      }
+    },
+    "/api/training/examples": {
+      "get": {
+        "deprecated": true,
+        "operationId": "list_examples_api_training_examples_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Examples"
+      },
+      "post": {
+        "deprecated": true,
+        "operationId": "create_example_api_training_examples_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TrainingExampleCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrainingExample"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Example"
+      }
+    },
+    "/api/training/examples/{ex_id}": {
+      "delete": {
+        "deprecated": true,
+        "operationId": "delete_example_api_training_examples__ex_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ex_id",
+            "required": true,
+            "schema": {
+              "title": "Ex Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Example"
+      }
+    },
+    "/api/v1/": {
+      "get": {
+        "operationId": "root_api_v1__get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Root"
+      }
+    },
+    "/api/v1/ask": {
+      "post": {
+        "operationId": "ask_endpoint_api_v1_ask_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AskBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Ask Endpoint"
+      }
+    },
+    "/api/v1/classify": {
+      "post": {
+        "operationId": "classify_endpoint_api_v1_classify_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClassifyBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Classify Endpoint"
+      }
+    },
+    "/api/v1/distillation/jobs": {
+      "get": {
+        "operationId": "list_jobs_api_v1_distillation_jobs_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Jobs"
+      },
+      "post": {
+        "operationId": "start_distillation_api_v1_distillation_jobs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DistillationStartBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Start Distillation"
+      }
+    },
+    "/api/v1/distillation/jobs/{job_id}": {
+      "delete": {
+        "operationId": "delete_job_api_v1_distillation_jobs__job_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Job"
+      }
+    },
+    "/api/v1/distillation/jobs/{job_id}/refresh": {
+      "post": {
+        "operationId": "refresh_job_api_v1_distillation_jobs__job_id__refresh_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_refresh_job_api_v1_distillation_jobs__job_id__refresh_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Refresh Job"
+      }
+    },
+    "/api/v1/health": {
+      "get": {
+        "operationId": "health_api_v1_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Health"
+      }
+    },
+    "/api/v1/incose/rules": {
+      "get": {
+        "operationId": "get_incose_rules_api_v1_incose_rules_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Incose Rules"
+      }
+    },
+    "/api/v1/index/rebuild": {
+      "post": {
+        "operationId": "index_rebuild_api_v1_index_rebuild_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IndexRebuildBody",
+                "default": {
+                  "embedding_model": "embeddinggemma",
+                  "ollama_url": "http://localhost:11434"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Index Rebuild",
+        "tags": [
+          "requirements"
+        ]
+      }
+    },
+    "/api/v1/index/status": {
+      "get": {
+        "operationId": "index_status_api_v1_index_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Index Status",
+        "tags": [
+          "requirements"
+        ]
+      }
+    },
+    "/api/v1/models": {
+      "get": {
+        "operationId": "get_models_api_v1_models_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Models"
+      }
+    },
+    "/api/v1/ollama/models": {
+      "get": {
+        "operationId": "get_ollama_models_api_v1_ollama_models_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "url",
+            "required": false,
+            "schema": {
+              "default": "http://localhost:11434",
+              "title": "Url",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Ollama Models"
+      }
+    },
+    "/api/v1/prompts": {
+      "get": {
+        "operationId": "list_prompts_api_v1_prompts_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Prompts"
+      },
+      "post": {
+        "operationId": "create_prompt_api_v1_prompts_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SystemPromptCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemPrompt"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Prompt"
+      }
+    },
+    "/api/v1/prompts/generate": {
+      "post": {
+        "operationId": "generate_prompt_api_v1_prompts_generate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PromptGenerateBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Generate Prompt"
+      }
+    },
+    "/api/v1/prompts/{prompt_id}": {
+      "delete": {
+        "operationId": "delete_prompt_api_v1_prompts__prompt_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "prompt_id",
+            "required": true,
+            "schema": {
+              "title": "Prompt Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Prompt"
+      },
+      "get": {
+        "operationId": "get_prompt_api_v1_prompts__prompt_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "prompt_id",
+            "required": true,
+            "schema": {
+              "title": "Prompt Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Prompt"
+      }
+    },
+    "/api/v1/requirements": {
+      "get": {
+        "operationId": "list_requirements_api_v1_requirements_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Requirements",
+        "tags": [
+          "requirements"
+        ]
+      },
+      "put": {
+        "operationId": "save_requirements_api_v1_requirements_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveRequirementsBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Save Requirements",
+        "tags": [
+          "requirements"
+        ]
+      }
+    },
+    "/api/v1/requirements/import": {
+      "post": {
+        "operationId": "import_requirements_api_v1_requirements_import_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "embedding_model",
+            "required": false,
+            "schema": {
+              "default": "embeddinggemma",
+              "title": "Embedding Model",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "ollama_url",
+            "required": false,
+            "schema": {
+              "default": "http://localhost:11434",
+              "title": "Ollama Url",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_import_requirements_api_v1_requirements_import_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Import Requirements",
+        "tags": [
+          "requirements"
+        ]
+      }
+    },
+    "/api/v1/review/requirement": {
+      "post": {
+        "operationId": "review_requirement_endpoint_api_v1_review_requirement_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewRequirementBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Review Requirement Endpoint"
+      }
+    },
+    "/api/v1/review/set": {
+      "post": {
+        "operationId": "review_set_endpoint_api_v1_review_set_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewSetBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Review Set Endpoint"
+      }
+    },
+    "/api/v1/search": {
+      "post": {
+        "operationId": "search_api_v1_search_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SearchBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Search",
+        "tags": [
+          "requirements"
+        ]
+      }
+    },
+    "/api/v1/summary": {
+      "post": {
+        "operationId": "summary_api_v1_summary_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SummaryBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Summary",
+        "tags": [
+          "requirements"
+        ]
+      }
+    },
+    "/api/v1/training/datasets": {
+      "get": {
+        "operationId": "list_datasets_api_v1_training_datasets_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Datasets"
+      },
+      "post": {
+        "operationId": "upload_dataset_api_v1_training_datasets_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_dataset_api_v1_training_datasets_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Upload Dataset"
+      }
+    },
+    "/api/v1/training/datasets/{ds_id}": {
+      "delete": {
+        "operationId": "delete_dataset_api_v1_training_datasets__ds_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ds_id",
+            "required": true,
+            "schema": {
+              "title": "Ds Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Dataset"
+      },
+      "get": {
+        "operationId": "get_dataset_api_v1_training_datasets__ds_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ds_id",
+            "required": true,
+            "schema": {
+              "title": "Ds Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Dataset"
+      }
+    },
+    "/api/v1/training/examples": {
+      "get": {
+        "operationId": "list_examples_api_v1_training_examples_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Examples"
+      },
+      "post": {
+        "operationId": "create_example_api_v1_training_examples_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TrainingExampleCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrainingExample"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Example"
+      }
+    },
+    "/api/v1/training/examples/{ex_id}": {
+      "delete": {
+        "operationId": "delete_example_api_v1_training_examples__ex_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ex_id",
+            "required": true,
+            "schema": {
+              "title": "Ex Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Example"
+      }
+    }
+  }
+}
