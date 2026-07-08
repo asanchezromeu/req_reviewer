@@ -512,6 +512,11 @@
             "title": "Embedding Model",
             "type": "string"
           },
+          "llm_model": {
+            "default": "gemma3:1b",
+            "title": "Llm Model",
+            "type": "string"
+          },
           "min_similarity": {
             "default": 0.3,
             "title": "Min Similarity",
@@ -520,6 +525,11 @@
           "ollama_url": {
             "default": "http://localhost:11434",
             "title": "Ollama Url",
+            "type": "string"
+          },
+          "provider": {
+            "default": "ollama",
+            "title": "Provider",
             "type": "string"
           },
           "query": {

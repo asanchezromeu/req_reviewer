@@ -56,6 +56,8 @@ export const api = {
       discarded: r.data.discarded,
       threshold: r.data.threshold,
       best_similarity: r.data.best_similarity,
+      answered: r.data.answered,
+      unverified: r.data.unverified,
     }));
   },
 

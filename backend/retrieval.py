@@ -18,11 +18,18 @@ from collections import Counter
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 import requests
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
+
+try:
+    from .llm_contract import extract_json, reconcile_by_id
+    from .search_prompts import SEARCH_VERIFICATION_PROMPT
+except ImportError:
+    from llm_contract import extract_json, reconcile_by_id
+    from search_prompts import SEARCH_VERIFICATION_PROMPT
 
 
 def utc_now() -> str:
@@ -51,6 +58,8 @@ class SearchBody(BaseModel):
     embedding_model: str = "embeddinggemma"
     ollama_url: str = "http://localhost:11434"
     min_similarity: float = 0.30
+    provider: str = "ollama"
+    llm_model: str = "gemma3:1b"
 
 
 class SummaryBody(BaseModel):
@@ -906,6 +915,59 @@ async def _embed_query(
     return query, indexed, query_vectors[0], ranking
 
 
+_VALID_VERDICTS = ("answers", "partially_answers", "does_not_answer")
+
+
+def _fallback_verdict(candidate_id: str) -> Dict[str, Any]:
+    return {
+        "id": candidate_id,
+        "verdict": "does_not_answer",
+        "justification": "Verification unavailable for this candidate.",
+        "facet": None,
+    }
+
+
+def _is_valid_verdict(item: Dict[str, Any]) -> bool:
+    return item.get("verdict") in _VALID_VERDICTS
+
+
+async def verify_candidates(
+    llm_complete: Callable[..., Awaitable[str]],
+    provider: str,
+    model: str,
+    ollama_url: str,
+    query: str,
+    candidates: List[Dict[str, Any]],
+) -> Tuple[List[Dict[str, Any]], bool]:
+    """Judge each candidate against the question (SPEC.md 2.2: verification-reasoning step).
+
+    Returns (verdicts, unverified). `verdicts` is one entry per candidate, in the
+    same order as `candidates`, each with `id`/`verdict`/`justification`/`facet`.
+    `unverified` is True only when the LLM call itself failed (provider down,
+    etc.) - in that case `verdicts` is empty and the caller should degrade to
+    similarity-only results rather than claim to know the answer.
+    """
+    candidate_ids = [item["id"] for item in candidates]
+    listing = "\n".join(f"[{item['id']}] {item['text']}" for item in candidates)
+    user_message = f"Question: {query}\n\nCandidates:\n{listing}"
+
+    try:
+        raw = await llm_complete(provider, model, SEARCH_VERIFICATION_PROMPT, user_message, ollama_url)
+    except Exception:
+        return [], True
+
+    try:
+        parsed = extract_json(raw)
+        verdicts = parsed.get("verdicts", [])
+        if not isinstance(verdicts, list):
+            verdicts = []
+    except Exception:
+        verdicts = []
+
+    reconciled = reconcile_by_id(candidate_ids, verdicts, "id", _fallback_verdict, _is_valid_verdict)
+    return reconciled, False
+
+
 def create_requirements_router(
     llm_complete: Callable[..., Awaitable[str]],
     database_path: Optional[Path] = None,
@@ -964,19 +1026,52 @@ def create_requirements_router(
             store, indexer, body.query, body.embedding_model, body.ollama_url, body.min_similarity
         )
         matches = ranking["matches"]
-        return {
-            "requirements": matches,
-            "requirement": matches[0] if matches else None,
-            "answered": bool(matches),
-            "message": (
-                None
-                if matches
-                else (
+
+        if not matches:
+            return {
+                "requirements": [],
+                "requirement": None,
+                "answered": False,
+                "message": (
                     "No requirement was similar enough to the query. "
                     f"Best similarity was {ranking['best_similarity']:.2f}; "
                     f"minimum is {ranking['threshold']:.2f}."
-                )
-            ),
+                ),
+                "discarded": ranking["discarded"],
+                "threshold": ranking["threshold"],
+                "best_similarity": ranking["best_similarity"],
+            }
+
+        verdicts, unverified = await verify_candidates(
+            llm_complete, body.provider, body.llm_model, body.ollama_url, body.query, matches
+        )
+
+        if unverified:
+            return {
+                "requirements": [
+                    {**item, "verdict": None, "justification": None, "facet": None}
+                    for item in matches
+                ],
+                "requirement": matches[0],
+                "answered": None,
+                "unverified": True,
+                "message": "Verification LLM unavailable; showing similarity-ranked matches without verdicts.",
+                "discarded": ranking["discarded"],
+                "threshold": ranking["threshold"],
+                "best_similarity": ranking["best_similarity"],
+            }
+
+        enriched = [
+            {**item, "verdict": verdict["verdict"], "justification": verdict["justification"], "facet": verdict.get("facet")}
+            for item, verdict in zip(matches, verdicts)
+        ]
+        answering = [item for item in enriched if item["verdict"] in ("answers", "partially_answers")]
+
+        return {
+            "requirements": enriched,
+            "requirement": answering[0] if len(answering) == 1 else None,
+            "answered": bool(answering),
+            "message": None if answering else "No requirement in the current set answers this question.",
             "discarded": ranking["discarded"],
             "threshold": ranking["threshold"],
             "best_similarity": ranking["best_similarity"],

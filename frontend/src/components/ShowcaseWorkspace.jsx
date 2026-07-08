@@ -66,6 +66,27 @@ function IndexBadge({ index }) {
   );
 }
 
+function VerdictBadge({ verdict }) {
+  if (!verdict) return null;
+  const labels = {
+    answers: "Answers",
+    partially_answers: "Partial answer",
+    does_not_answer: "Does not answer",
+  };
+  const color = {
+    answers: "bg-emerald-50 text-emerald-800",
+    partially_answers: "bg-amber-50 text-amber-800",
+    does_not_answer: "bg-neutral-100 text-neutral-500",
+  };
+  return (
+    <span
+      className={`rounded-full px-2 py-0.5 text-xs font-semibold ${color[verdict] || "bg-neutral-100 text-neutral-500"}`}
+    >
+      {labels[verdict] || verdict}
+    </span>
+  );
+}
+
 export default function ShowcaseWorkspace() {
   const [requirements, setRequirements] = useState([]);
   const [index, setIndex] = useState({ state: "empty", total: 0, indexed: 0 });
@@ -250,6 +271,11 @@ export default function ShowcaseWorkspace() {
             <div className="text-xs font-semibold uppercase tracking-[0.14em] text-teal-700">
               Requirement matches
             </div>
+            {result.unverified && (
+              <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-900">
+                Verification LLM unavailable - showing similarity-ranked matches without verdicts.
+              </div>
+            )}
             {result.message ? (
               <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900">
                 {result.message}
@@ -267,10 +293,19 @@ export default function ShowcaseWorkspace() {
                       <span className="rounded-full bg-white/10 px-2 py-0.5 text-xs text-slate-300">
                         score {formatNumber(requirement.score ?? requirement.similarity)}
                       </span>
+                      <VerdictBadge verdict={requirement.verdict} />
+                      {requirement.facet && (
+                        <span className="rounded-full bg-white/10 px-2 py-0.5 text-xs text-slate-300">
+                          facet: {requirement.facet}
+                        </span>
+                      )}
                     </div>
                     <div className="mt-2 text-lg leading-relaxed">{requirement.text}</div>
                     {requirement.source && (
                       <div className="mt-2 text-xs text-slate-400">{requirement.source}</div>
+                    )}
+                    {requirement.justification && (
+                      <div className="mt-2 text-sm italic text-slate-400">{requirement.justification}</div>
                     )}
                   </div>
                 ))}

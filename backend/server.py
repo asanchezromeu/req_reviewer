@@ -31,6 +31,8 @@ try:
     )
     from .retrieval import create_requirements_router
     from .auth import require_api_key
+    from .llm_contract import extract_json
+    from . import deterministic_review
 except ImportError:
     from incose_rules import (
         INCOSE_RULES,
@@ -40,6 +42,8 @@ except ImportError:
     )
     from retrieval import create_requirements_router
     from auth import require_api_key
+    from llm_contract import extract_json
+    import deterministic_review
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
@@ -373,20 +377,56 @@ async def llm_complete(
 
 def parse_json_strict(text: str) -> Dict[str, Any]:
     """Extract JSON object from LLM output, tolerant to markdown fences."""
-    t = text.strip()
-    if t.startswith("```"):
-        # strip ``` fences
-        t = t.strip("`")
-        # remove possible language tag like 'json\n'
-        if "\n" in t:
-            first, rest = t.split("\n", 1)
-            if first.lower().strip() in ("json", ""):
-                t = rest
-    start = t.find("{")
-    end = t.rfind("}")
-    if start == -1 or end == -1:
-        raise ValueError("No JSON object in response")
-    return json.loads(t[start : end + 1])
+    return extract_json(text)
+
+
+# Best-effort mapping from the deterministic scorer's flags to the INCOSE rule
+# keys they're most related to, used only by the fallback below.
+_FLAG_TO_RULES = {
+    "Use shall/must": ("unambiguous", "consistent"),
+    "Ambiguous wording": ("unambiguous",),
+    "No measurable criterion": ("verifiable",),
+    "May not be singular": ("singular",),
+    "Context missing": ("complete",),
+    "Too short": ("complete",),
+    "Too long": ("complete",),
+    "Incomplete placeholder": ("necessary", "complete"),
+    "Traceability missing": ("traceable",),
+}
+
+
+def deterministic_fallback_review(req_id: str, req_text: str, reason: str) -> Dict[str, Any]:
+    """Heuristic, non-LLM review used when the model's output couldn't be parsed.
+
+    Per SPEC.md's architectural rule 4, malformed LLM output must degrade to
+    the deterministic fallback, never crash or silently pass through as if it
+    were a real (very bad) review.
+    """
+    review = deterministic_review.review_requirement(
+        deterministic_review.Requirement(id=req_id, text=req_text)
+    )
+    flags = [] if review.flags == "OK" else [flag.strip() for flag in review.flags.split(",")]
+    flagged_rules: Dict[str, str] = {}
+    for flag in flags:
+        for rule_key in _FLAG_TO_RULES.get(flag, ()):
+            flagged_rules.setdefault(rule_key, flag)
+
+    rules = {
+        rule["key"]: {
+            "score": 50 if rule["key"] in flagged_rules else review.score,
+            "finding": flagged_rules.get(rule["key"], ""),
+        }
+        for rule in INCOSE_RULES
+    }
+    return {
+        "requirement_id": req_id,
+        "requirement_text": req_text,
+        "overall_score": review.score,
+        "summary": f"LLM review unavailable ({reason}); showing a heuristic fallback score instead.",
+        "proposed_fix": review.improvement or req_text,
+        "rules": rules,
+        "fallback": True,
+    }
 
 
 # ---------- Routes ----------
@@ -487,15 +527,9 @@ async def analyze_one(
         return parsed
     except Exception as e:
         logger.exception("analyze_one failed")
-        return {
-            "requirement_id": req_id,
-            "requirement_text": req_text,
-            "overall_score": 0,
-            "summary": f"Analysis failed: {e}",
-            "proposed_fix": req_text,
-            "rules": {r["key"]: {"score": 0, "finding": "Analysis failed"} for r in INCOSE_RULES},
-            "error": str(e),
-        }
+        fallback = deterministic_fallback_review(req_id, req_text, str(e))
+        fallback["error"] = str(e)
+        return fallback
 
 
 @api.post("/review/requirement")

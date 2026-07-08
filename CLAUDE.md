@@ -33,10 +33,10 @@ uvicorn backend.server:app --reload --host 0.0.0.0 --port 8000   # run from repo
 Backend tests:
 
 ```bash
-python -m unittest backend.tests.test_retrieval -v              # stdlib-only, no server needed
-python -m unittest backend.tests.test_conflict_precheck -v      # stdlib-only, no server needed
-python -m unittest backend.tests.test_deterministic_review -v   # stdlib-only, no server needed
-python -m unittest backend.tests.test_auth -v                   # stdlib+fastapi TestClient, no server needed
+python -m unittest backend.tests.test_retrieval backend.tests.test_conflict_precheck \
+  backend.tests.test_deterministic_review backend.tests.test_auth backend.tests.test_llm_contract \
+  backend.tests.test_review_fallback backend.tests.test_search_verification -v
+  # ^ all stdlib+fastapi TestClient only, no live server or Ollama needed (LLM calls are mocked)
 pytest backend/tests/test_reqiq_api.py     # hits a running server; BASE_URL/REACT_APP_BACKEND_URL env, defaults to http://localhost:8000
 pytest backend/tests/test_reqiq_iter2.py
 python -m backend.export_openapi           # regenerate backend/openapi.json after any route change
@@ -100,10 +100,20 @@ python -m unittest tests.test_req_analysis -v
   `README.md`). During development the frontend runs separately on :3000 instead.
 - `backend/incose_rules.py` holds the INCOSE 8-rule definitions plus the system prompts used for
   individual requirement scoring, set-level consistency checks, and the plain-language summarizer.
-- `backend/conflict_precheck.py` and `backend/deterministic_review.py` are standalone, tested
-  utilities salvaged from the frozen prototypes (see `legacy/README.md`) — a heuristic conflict
-  pre-check and a non-LLM deterministic scorer/parser, respectively. Neither is wired into any route
-  yet; that wiring is future work.
+- `backend/conflict_precheck.py` is a standalone, tested utility salvaged from the frozen Node
+  prototype (see `legacy/README.md`) — a heuristic conflict pre-check. Not wired into any route yet;
+  that wiring is future work.
+- `backend/deterministic_review.py` (salvaged from the frozen Streamlit prototype) is wired in as of
+  Phase 2: `analyze_one`'s `deterministic_fallback_review(...)` uses it to degrade gracefully when
+  the review LLM returns unparsable JSON — a real heuristic score instead of a hardcoded zero. This
+  was directly motivated by live testing: `gemma3:1b` returns malformed JSON on a meaningful fraction
+  of review calls.
+- `backend/llm_contract.py` is the "structured LLM I/O contract" module (`SPEC.md` Phase 2),
+  generalizing the legacy `review-contract.mjs` idea: `extract_json` (tolerant JSON extraction,
+  `parse_json_strict` is now a thin re-export of it) and `reconcile_by_id` (schema-agnostic
+  id-anchored reconciliation — every expected id gets exactly one result, synthesizing a fallback via
+  a caller-supplied function when the model omitted or invalidated one). Used by both the
+  review-fallback retrofit above and the search verification step below.
 - `backend/openapi.json` is a committed snapshot of the OpenAPI schema — regenerate it with
   `python -m backend.export_openapi` whenever routes change.
 
@@ -118,12 +128,22 @@ ranking, exposed via `create_requirements_router(llm_complete)`:
   polling from the frontend (`GET /index/status`, or trigger one explicitly with `POST /index/rebuild`).
 - Retrieval blends multiple signals — cosine similarity on embeddings plus `keyword_score`,
   `phrase_score`, `structural_score`, and `parameter_penalty` — in `ranked_matches`/`score_requirement`.
-- Two separate endpoints (previously one endpoint with a `mode` field): `POST /search` returns only
-  the closest matching requirement(s); `POST /summary` (`broad_summary_sources` for broad queries,
-  otherwise the top-N via `select_summary_sources`) retrieves several requirements and asks the local
-  LLM (`ollama_summary`) for an executive summary, with `fallback_summary`/
-  `summarize_quantitative_answer` as non-LLM fallbacks (`degraded: true` in the response when the LLM
-  path wasn't used).
+- `POST /summary` (`broad_summary_sources` for broad queries, otherwise the top-N via
+  `select_summary_sources`) retrieves several requirements and asks the local LLM (`ollama_summary`)
+  for an executive summary, with `fallback_summary`/`summarize_quantitative_answer` as non-LLM
+  fallbacks (`degraded: true` in the response when the LLM path wasn't used).
+- `POST /search` (Phase 2: `SPEC.md` 2.2 "advanced search") is retrieve-then-verify, not just
+  ranking: `ranked_matches` produces candidates, then `verify_candidates` (using
+  `backend/search_prompts.py`'s `SEARCH_VERIFICATION_PROMPT` via `llm_complete`, provider-agnostic)
+  judges each one as `answers` / `partially_answers` / `does_not_answer` with a justification and an
+  optional `facet` label, reconciled through `llm_contract.reconcile_by_id` so every candidate gets a
+  verdict even if the model's response was incomplete. Cardinality logic then decides the top-level
+  `answered`/`requirement` fields: exactly one `answers`/`partially_answers` candidate → that one;
+  several (e.g. different operating modes) → all of them, `requirement: null`, distinguished by
+  `facet`; none → `answered: false` with an honest message — the response always includes every
+  candidate + its verdict for transparency, never fabricates an answer. If the verification LLM call
+  itself fails, the response degrades to similarity-only matches with `unverified: true` rather than
+  failing the request.
 
 **Frontend** (`frontend/src/`):
 
@@ -137,6 +157,10 @@ ranking, exposed via `create_requirements_router(llm_complete)`:
   `api.searchShowcase(payload)` dispatches to `POST /search` or `POST /summary` based on
   `payload.mode` and reshapes the response back to the `{mode, ...}` shape
   `ShowcaseWorkspace.jsx` expects, so that component didn't need to change in Phase 1.
+  `requirements`/`requirement` items may now carry `verdict`/`justification`/`facet` (Phase 2).
+- `ShowcaseWorkspace.jsx`'s requirement-mode result cards show a `VerdictBadge` (Answers / Partial
+  answer / Does not answer) and the justification/facet text per match when present, plus a notice
+  when the response came back `unverified` (verification LLM unavailable).
 - `components/ui/` holds generated shadcn/radix primitives (accordion, dialog, dropdown, etc.) —
   treat these as vendored, not hand-written app code.
 - Path alias `@` → `frontend/src` is configured in `craco.config.js` (webpack alias) and
