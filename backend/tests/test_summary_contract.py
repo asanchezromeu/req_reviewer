@@ -7,9 +7,11 @@ from unittest.mock import patch
 try:
     from backend import retrieval
     from backend.retrieval import create_requirements_router, summary_violates_contract
+    from backend.summary_prompts import EXECUTIVE_SUMMARY_PROMPT
 except ImportError:
     import retrieval
     from retrieval import create_requirements_router, summary_violates_contract
+    from summary_prompts import EXECUTIVE_SUMMARY_PROMPT
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -35,6 +37,13 @@ SOURCES = [
         "breakdown": {},
     },
 ]
+
+
+class SummaryPromptTests(unittest.TestCase):
+    def test_prompt_instructs_disclosing_non_unique_or_conflicting_answers(self):
+        # Regression test: this instruction existed in the prompt this module
+        # replaced and must not be silently dropped.
+        self.assertIn("conflicting", EXECUTIVE_SUMMARY_PROMPT.lower())
 
 
 class SummaryContractUnitTests(unittest.TestCase):

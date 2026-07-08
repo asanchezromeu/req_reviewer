@@ -1,5 +1,6 @@
 import json
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -87,6 +88,36 @@ class ReferenceIngestionRouteTests(unittest.TestCase):
     def test_empty_ingest_rejected(self):
         response = self.client.post("/corpus/references", json={"document": "EMPTY", "text": "   "})
         self.assertEqual(response.status_code, 400)
+
+    def test_concurrent_ingest_of_same_document_does_not_lose_chunks(self):
+        # Regression test for a TOCTOU race: two concurrent ingests of the
+        # same document used to be able to read the same existing_count and
+        # collide on the same chunk_id, silently overwriting one chunk.
+        store = self.router.store
+        barrier = threading.Barrier(2)
+        errors = []
+
+        def ingest(text):
+            try:
+                barrier.wait(timeout=5)
+                store.add_reference_chunks("RACE-DOC", None, [text])
+            except Exception as exc:  # pragma: no cover - surfaced via `errors`
+                errors.append(exc)
+
+        threads = [
+            threading.Thread(target=ingest, args=("Chunk A content.",)),
+            threading.Thread(target=ingest, args=("Chunk B content.",)),
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=10)
+
+        self.assertEqual(errors, [])
+        chunks = store.list_reference_chunks()
+        self.assertEqual(len(chunks), 2, f"expected both concurrent chunks to survive, got: {chunks}")
+        texts = {chunk["text"] for chunk in chunks}
+        self.assertEqual(texts, {"Chunk A content.", "Chunk B content."})
 
     def test_search_injects_reference_context_into_verification_prompt(self):
         rows = [Requirement(id="REQ-001", text="The zone controller shall log all authentication failures.")]

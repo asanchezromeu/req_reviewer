@@ -11,6 +11,9 @@ Rules:
   is not.
 - Do not invent anything. Only state what the given requirements actually support. If they do not
   answer the question, say plainly that the requirement set does not specify this - do not guess.
+- If the requirements give more than one distinct or conflicting answer (e.g. different values for
+  different modes, or genuinely contradictory statements), say so explicitly instead of picking one
+  value as if it were the single answer.
 - End your answer with a new line in exactly this form: "Sources: <id>, <id>, ..." listing every
   requirement id you used, separated by commas. List ids only, never requirement text, on that line.
 """

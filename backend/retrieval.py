@@ -306,9 +306,16 @@ class RequirementStore:
     def add_reference_chunks(
         self, document: str, title: Optional[str], chunks: List[str]
     ) -> List[Dict[str, Any]]:
-        """Append chunks for one ingested document (additive - does not remove existing chunks)."""
+        """Append chunks for one ingested document (additive - does not remove existing chunks).
+
+        BEGIN IMMEDIATE acquires the write lock before the count read, so two
+        concurrent ingests of the same document can't both read the same
+        existing_count and collide on the same chunk_id - the second call
+        blocks (up to connect()'s timeout) until the first commits.
+        """
         now = utc_now()
         with self.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
             existing_count = connection.execute(
                 "SELECT COUNT(*) FROM reference_chunks WHERE document = ?", (document,)
             ).fetchone()[0]

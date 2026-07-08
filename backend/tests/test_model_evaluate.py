@@ -52,6 +52,42 @@ class ModelEvaluateTests(unittest.TestCase):
             )
         self.assertEqual(ctx.exception.status_code, 400)
 
+    def test_explicit_empty_example_ids_is_rejected_not_treated_as_whole_corpus(self):
+        # Regression test: an explicit `example_ids: []` must not silently
+        # fall back to evaluating the entire corpus.
+        self._add_example("good", GOOD_TEXT)
+
+        with self.assertRaises(HTTPException) as ctx:
+            run(
+                server.evaluate_model(
+                    server.EvaluateBody(candidate_provider="ollama", candidate_model="x", example_ids=[])
+                )
+            )
+        self.assertEqual(ctx.exception.status_code, 400)
+
+    def test_ollama_url_is_passed_through_to_both_models(self):
+        # Regression test: EvaluateBody.ollama_url must actually reach analyze_one.
+        self._add_example("good", GOOD_TEXT)
+        captured_urls = []
+
+        async def fake_llm_complete(provider, model, sys_msg, user, ollama_url=None):
+            captured_urls.append(ollama_url)
+            return json.dumps({"overall_score": 90, "summary": "x", "proposed_fix": "", "rules": {}})
+
+        with patch.object(server, "llm_complete", fake_llm_complete):
+            run(
+                server.evaluate_model(
+                    server.EvaluateBody(
+                        candidate_provider="ollama",
+                        candidate_model="model-b",
+                        ollama_url="http://gpu-box:11434",
+                    )
+                )
+            )
+
+        self.assertTrue(captured_urls)
+        self.assertTrue(all(url == "http://gpu-box:11434" for url in captured_urls))
+
     def test_candidate_outperforms_baseline(self):
         self._add_example("good", GOOD_TEXT)
         self._add_example("bad", BAD_TEXT)

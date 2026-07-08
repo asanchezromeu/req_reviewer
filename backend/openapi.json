@@ -301,6 +301,17 @@
             "title": "Feature",
             "type": "string"
           },
+          "ollama_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ollama Url"
+          },
           "tailoring_prompt_id": {
             "anyOf": [
               {

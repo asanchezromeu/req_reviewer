@@ -519,10 +519,13 @@ async def get_fewshot_prefix(max_per_label: int = 3) -> str:
     not semantic retrieval (that's Tier 2, over reference material). Empty
     string when the corpus has nothing yet, so a fresh install is unaffected.
     """
-    cursor = db.training_examples.find({}, {"_id": 0}).sort("created_at", -1)
-    examples = await cursor.to_list(200)
-    good = [ex for ex in examples if ex.get("label") == "good"][:max_per_label]
-    bad = [ex for ex in examples if ex.get("label") == "bad"][:max_per_label]
+    # Query each label separately so one label's volume can never crowd the
+    # other out (a single combined "most recent 200, then split" fetch could
+    # silently drop an entire label once the corpus skews heavily).
+    good_cursor = db.training_examples.find({"label": "good"}, {"_id": 0}).sort("created_at", -1)
+    bad_cursor = db.training_examples.find({"label": "bad"}, {"_id": 0}).sort("created_at", -1)
+    good = await good_cursor.to_list(max_per_label)
+    bad = await bad_cursor.to_list(max_per_label)
     if not good and not bad:
         return ""
 
@@ -1099,6 +1102,7 @@ class EvaluateBody(BaseModel):
     candidate_model: str
     example_ids: Optional[List[str]] = None
     tailoring_prompt_id: Optional[str] = None
+    ollama_url: Optional[str] = None
 
 
 @api.post("/datasets/export")
@@ -1167,7 +1171,7 @@ async def evaluate_model(body: EvaluateBody):
             detail="Only the 'review' feature is currently supported for evaluation",
         )
 
-    if body.example_ids:
+    if body.example_ids is not None:
         examples = []
         for ex_id in body.example_ids:
             doc = await db.training_examples.find_one({"id": ex_id}, {"_id": 0})
@@ -1192,6 +1196,7 @@ async def evaluate_model(body: EvaluateBody):
                 f"EX-{example['id'][:8]}",
                 example["requirement_text"],
                 tailoring,
+                body.ollama_url,
             )
             return {
                 "example_id": example["id"],

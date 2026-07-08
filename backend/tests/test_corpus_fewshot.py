@@ -70,6 +70,19 @@ class FewshotPrefixTests(unittest.TestCase):
         self.assertIn("CURATED EXAMPLES", captured["sys_msg"])
         self.assertIn("200 ms", captured["sys_msg"])
 
+    def test_good_examples_survive_when_corpus_is_skewed_toward_bad(self):
+        # Regression test: querying good/bad separately means a label with
+        # few examples can't be crowded out by a flood of the other label,
+        # unlike a "fetch the 200 most recent, then split" approach would.
+        self._add_example("good", "The system shall respond within 200 ms.", "Measurable.")
+        for i in range(20):
+            self._add_example("bad", f"Extra bad example {i}.")
+
+        prefix = run(server.get_fewshot_prefix(max_per_label=3))
+
+        self.assertEqual(prefix.count("GOOD:"), 1)
+        self.assertEqual(prefix.count("BAD:"), 3)
+
     def test_review_requirement_prompt_unaffected_when_corpus_empty(self):
         captured = {}
 
