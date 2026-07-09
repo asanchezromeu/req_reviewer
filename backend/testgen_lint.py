@@ -111,12 +111,14 @@ def check_anti_genericity(
     violations += _generic_phrase_violations(preconditions, "precondition")
     violations += _generic_phrase_violations(acceptance_criteria, "acceptance criterion")
 
-    # Only force a measurable quantity when the requirement or context actually
-    # establishes one - a purely functional/logging requirement with no inherent
-    # quantity can be satisfied by an observable-state criterion instead (A.7).
-    require_quantity = verification_method == "test" and (
-        _has_measure(requirement_text) or any(_has_measure(str(item.get("value", ""))) for item in context_items)
-    )
+    # Only force a measurable quantity when the requirement itself actually establishes
+    # one - a purely functional/logging requirement with no inherent quantity can be
+    # satisfied by an observable-state criterion instead (A.7). Checking "any context
+    # item anywhere has a measure" (as this used to) is too broad once the project test
+    # context has more than a couple of items - a voltage or temperature value elsewhere
+    # in the context has nothing to do with, say, a state-transition requirement, but
+    # would still force it to invent a number.
+    require_quantity = verification_method == "test" and _has_measure(requirement_text)
     violations += _missing_measure_violations(acceptance_criteria, require_quantity)
 
     traceable_digits = _traceable_digits(requirement_text, context_items, assumptions or [])

@@ -66,6 +66,22 @@ class AntiGenericityLintTests(unittest.TestCase):
         violations = check_anti_genericity(generated, "The system shall log all authentication failures.", [], [])
         self.assertEqual(violations, [])
 
+    def test_missing_measure_not_required_when_only_an_unrelated_context_item_has_one(self):
+        # Regression test for a real live-testing finding: an unrelated context item
+        # (e.g. a voltage value from a different requirement entirely) used to force
+        # every requirement in the project to require a numeric acceptance criterion,
+        # even a plain state-transition requirement with no inherent quantity.
+        generated = {
+            "preconditions": ["The PBDU has just powered on."],
+            "acceptance_criteria": ["The PBDU enters the Initialization state."],
+            "verification_method": "test",
+        }
+        context_items = [{"category": "parameter", "key": "nominal_supply_voltage", "value": "12 V"}]
+        violations = check_anti_genericity(
+            generated, "The PBDU shall enter Initialization state after power-up.", context_items, []
+        )
+        self.assertEqual(violations, [])
+
     def test_untraceable_numeric_value_flagged(self):
         generated = {
             "preconditions": ["Bench with regulated PSU at 12 V."],
