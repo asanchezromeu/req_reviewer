@@ -1201,7 +1201,7 @@ def create_requirements_router(
 ) -> APIRouter:
     store = RequirementStore(
         database_path
-        or Path(os.environ.get("REQUIREMENTS_DB_PATH", Path(__file__).parent / "data" / "requirements.db"))
+        or Path(os.environ.get("REQUIREMENTS_DB_PATH") or Path(__file__).parent / "data" / "requirements.db")
     )
     indexer = IndexCoordinator(store)
     reference_indexer = IndexCoordinator(
