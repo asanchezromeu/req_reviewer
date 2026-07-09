@@ -172,9 +172,12 @@ python -m unittest tests.test_req_analysis -v
     new version** rather than mutating in place (`get_current_test_context` reads the highest
     `version`), so old versions are retained — a generated test case records which context version
     it was built against. `GET /testgen/context` (404 until the first analyze), `PATCH
-    /testgen/context` (apply `item_updates`/`new_items`/`question_answers`, bump the version —
-    answering a question also appends a derived context item), `GET /testgen/context/questions`
-    (optional `?status=open|answered` filter).
+    /testgen/context` (apply `item_updates`/`new_items`/`question_answers`/`item_removals`, bump the
+    version — answering a question also appends a derived context item; `item_removals` exists
+    because the analysis LLM call can and does fabricate items with no basis in the actual
+    requirement set - e.g. inventing an interface or a tolerance never stated anywhere - and
+    `item_updates` alone can't discard a fabricated item, only correct its value), `GET
+    /testgen/context/questions` (optional `?status=open|answered` filter).
   - `GET/PUT/DELETE /testgen/category-strategies[/{category}]` — same "defaults + override" pattern
     as `/models/registry` (Phase 5): `backend/testgen_prompts.py`'s `DEFAULT_CATEGORY_STRATEGIES`
     (the 7 built-ins, transcribed from the addendum's A.3 table) plus any stored override/custom

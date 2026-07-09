@@ -1182,6 +1182,7 @@ class ContextPatchBody(BaseModel):
     item_updates: List[ContextItemUpdate] = []
     new_items: List[ContextNewItem] = []
     question_answers: List[ContextQuestionAnswer] = []
+    item_removals: List[str] = []
 
 
 async def get_current_test_context() -> Optional[Dict[str, Any]]:
@@ -1708,6 +1709,13 @@ async def patch_test_context(body: ContextPatchBody):
         target["value"] = update.value
         if target["status"] == "inferred":
             target["status"] = "confirmed"
+
+    for removal_id in body.item_removals:
+        if removal_id not in by_id:
+            raise HTTPException(status_code=404, detail=f"Unknown context item id: {removal_id}")
+    if body.item_removals:
+        removed = set(body.item_removals)
+        items = [item for item in items if item["id"] not in removed]
 
     for new_item in body.new_items:
         items.append(

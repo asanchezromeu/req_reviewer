@@ -323,6 +323,14 @@
       },
       "ContextPatchBody": {
         "properties": {
+          "item_removals": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Item Removals",
+            "type": "array"
+          },
           "item_updates": {
             "default": [],
             "items": {

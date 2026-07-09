@@ -129,6 +129,45 @@ class TestgenContextTests(unittest.TestCase):
         self.assertEqual(updated.value, "12 V +/- 10%")
         self.assertEqual(updated.status, "confirmed")
 
+    def test_patch_removes_a_fabricated_item(self):
+        self._seed_requirement("REQ-001", "The zone controller shall withstand 12 V nominal supply.")
+
+        async def fake_llm_complete(provider, model, sys_msg, user, ollama_url=None):
+            return json.dumps(
+                {
+                    "items": [
+                        {"category": "parameter", "key": "voltage", "value": "12 V", "source_requirement_ids": ["REQ-001"]},
+                        {"category": "interface", "key": "SPI", "value": "SPI interface", "source_requirement_ids": []},
+                    ],
+                    "questions": [],
+                }
+            )
+
+        with patch.object(server, "llm_complete", fake_llm_complete):
+            v1 = run(server.analyze_test_context(server.ContextAnalyzeBody()))
+
+        self.assertEqual(len(v1.items), 2)
+        fabricated_id = next(item.id for item in v1.items if item.key == "SPI")
+
+        v2 = run(server.patch_test_context(server.ContextPatchBody(item_removals=[fabricated_id])))
+
+        self.assertEqual(v2.version, 2)
+        self.assertEqual(len(v2.items), 1)
+        self.assertNotIn(fabricated_id, [item.id for item in v2.items])
+
+    def test_patch_removal_of_unknown_item_404s(self):
+        self._seed_requirement("REQ-001", "The zone controller shall withstand 12 V nominal supply.")
+
+        async def fake_llm_complete(provider, model, sys_msg, user, ollama_url=None):
+            return json.dumps({"items": [], "questions": []})
+
+        with patch.object(server, "llm_complete", fake_llm_complete):
+            run(server.analyze_test_context(server.ContextAnalyzeBody()))
+
+        with self.assertRaises(HTTPException) as ctx:
+            run(server.patch_test_context(server.ContextPatchBody(item_removals=["nope"])))
+        self.assertEqual(ctx.exception.status_code, 404)
+
     def test_patch_answers_question_and_adds_context_item(self):
         self._seed_requirement("REQ-001", "The zone controller shall log all authentication failures.")
 
