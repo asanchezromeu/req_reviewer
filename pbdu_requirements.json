@@ -1,0 +1,288 @@
+{
+  "requirements": [
+    {
+      "id": "PBDU-VI-001",
+      "text": "The PBDU shall measure the supply input voltage at the main power input terminal."
+    },
+    {
+      "id": "PBDU-VI-002",
+      "text": "The PBDU shall measure the output voltage of each controlled power load channel."
+    },
+    {
+      "id": "PBDU-VI-003",
+      "text": "The PBDU shall measure the current consumed by each controlled power load channel."
+    },
+    {
+      "id": "PBDU-VI-004",
+      "text": "The PBDU shall detect an overcurrent condition on each controlled power load channel."
+    },
+    {
+      "id": "PBDU-VI-005",
+      "text": "The PBDU shall detect an undervoltage condition at the main power input terminal."
+    },
+    {
+      "id": "PBDU-VI-006",
+      "text": "The PBDU shall detect an overvoltage condition at the main power input terminal."
+    },
+    {
+      "id": "PBDU-VI-007",
+      "text": "The PBDU shall provide voltage and current measurement values to the communication interface."
+    },
+    {
+      "id": "PBDU-VI-008",
+      "text": "The PBDU shall update voltage and current measurements periodically during normal operation."
+    },
+    {
+      "id": "PBDU-PLC-001",
+      "text": "The PBDU shall control the activation and deactivation of each power load channel."
+    },
+    {
+      "id": "PBDU-PLC-002",
+      "text": "The PBDU shall support independent control of each power load channel."
+    },
+    {
+      "id": "PBDU-PLC-003",
+      "text": "The PBDU shall switch off a power load channel when an overcurrent condition is detected on that channel."
+    },
+    {
+      "id": "PBDU-PLC-004",
+      "text": "The PBDU shall maintain each power load channel in a safe state during system initialization."
+    },
+    {
+      "id": "PBDU-PLC-005",
+      "text": "The PBDU shall prevent activation of a power load channel when the input supply voltage is outside the allowed operating range."
+    },
+    {
+      "id": "PBDU-PLC-006",
+      "text": "The PBDU shall report the commanded state and actual state of each power load channel."
+    },
+    {
+      "id": "PBDU-PLC-007",
+      "text": "The PBDU shall support diagnostic control commands for power load testing."
+    },
+    {
+      "id": "PBDU-PLC-008",
+      "text": "The PBDU shall store the last valid commanded state of each load channel when required by the system state manager."
+    },
+    {
+      "id": "PBDU-HM-001",
+      "text": "The PBDU shall monitor the internal MCU operating status."
+    },
+    {
+      "id": "PBDU-HM-002",
+      "text": "The PBDU shall monitor the internal temperature of the power distribution unit."
+    },
+    {
+      "id": "PBDU-HM-003",
+      "text": "The PBDU shall detect loss of communication with external sensors connected to analog inputs when applicable."
+    },
+    {
+      "id": "PBDU-HM-004",
+      "text": "The PBDU shall detect short-to-battery faults on controlled power load outputs."
+    },
+    {
+      "id": "PBDU-HM-005",
+      "text": "The PBDU shall detect short-to-ground faults on controlled power load outputs."
+    },
+    {
+      "id": "PBDU-HM-006",
+      "text": "The PBDU shall detect open-load conditions on supported power load channels."
+    },
+    {
+      "id": "PBDU-HM-007",
+      "text": "The PBDU shall store diagnostic trouble information when a monitored fault is detected."
+    },
+    {
+      "id": "PBDU-HM-008",
+      "text": "The PBDU shall provide health status information through CAN and Ethernet communication interfaces."
+    },
+    {
+      "id": "PBDU-COM-001",
+      "text": "The PBDU shall support CAN communication with external vehicle control units."
+    },
+    {
+      "id": "PBDU-COM-002",
+      "text": "The PBDU shall support Ethernet communication with external vehicle control units."
+    },
+    {
+      "id": "PBDU-COM-003",
+      "text": "The PBDU shall receive load control commands through the CAN communication interface."
+    },
+    {
+      "id": "PBDU-COM-004",
+      "text": "The PBDU shall receive load control commands through the Ethernet communication interface."
+    },
+    {
+      "id": "PBDU-COM-005",
+      "text": "The PBDU shall transmit voltage, current, temperature, and diagnostic status information through CAN."
+    },
+    {
+      "id": "PBDU-COM-006",
+      "text": "The PBDU shall transmit voltage, current, temperature, and diagnostic status information through Ethernet."
+    },
+    {
+      "id": "PBDU-COM-007",
+      "text": "The PBDU shall detect communication timeout conditions for safety-relevant control messages."
+    },
+    {
+      "id": "PBDU-COM-008",
+      "text": "The PBDU shall reject communication messages with invalid checksum, counter, or data length information when such protection is configured."
+    },
+    {
+      "id": "PBDU-SM-001",
+      "text": "The PBDU shall implement at least the states Off, Initialization, Normal Operation, Degraded Operation, Fault, and Sleep."
+    },
+    {
+      "id": "PBDU-SM-002",
+      "text": "The PBDU shall enter Initialization state after power-up."
+    },
+    {
+      "id": "PBDU-SM-003",
+      "text": "The PBDU shall enter Normal Operation state when initialization is completed and no blocking fault is present."
+    },
+    {
+      "id": "PBDU-SM-004",
+      "text": "The PBDU shall enter Degraded Operation state when a non-critical fault limits system functionality."
+    },
+    {
+      "id": "PBDU-SM-005",
+      "text": "The PBDU shall enter Fault state when a critical fault is detected."
+    },
+    {
+      "id": "PBDU-SM-006",
+      "text": "The PBDU shall deactivate affected power load channels when entering Fault state."
+    },
+    {
+      "id": "PBDU-SM-007",
+      "text": "The PBDU shall enter Sleep state when a valid sleep request is received and wake-up conditions are not active."
+    },
+    {
+      "id": "PBDU-SM-008",
+      "text": "The PBDU shall wake from Sleep state when a valid wake-up event is detected."
+    },
+    {
+      "id": "PBDU-ELEC-001",
+      "text": "The PBDU shall operate from a nominal 12 V vehicle electrical supply."
+    },
+    {
+      "id": "PBDU-ELEC-002",
+      "text": "The PBDU shall tolerate transient voltage conditions defined for the vehicle electrical environment."
+    },
+    {
+      "id": "PBDU-ELEC-003",
+      "text": "The PBDU shall protect its power outputs against short-circuit conditions."
+    },
+    {
+      "id": "PBDU-ELEC-004",
+      "text": "The PBDU shall provide reverse polarity protection at the main power input."
+    },
+    {
+      "id": "PBDU-ELEC-005",
+      "text": "The PBDU shall limit leakage current on deactivated power load channels."
+    },
+    {
+      "id": "PBDU-ELEC-006",
+      "text": "The PBDU shall provide electrical isolation or protection between external sensor inputs and internal MCU pins where required."
+    },
+    {
+      "id": "PBDU-ELEC-007",
+      "text": "The PBDU shall support analog sensor input voltage measurement within the configured sensor input range."
+    },
+    {
+      "id": "PBDU-ELEC-008",
+      "text": "The PBDU shall meet electromagnetic compatibility requirements applicable to automotive electronic control units."
+    },
+    {
+      "id": "PBDU-CON-001",
+      "text": "The PBDU shall use an automotive-grade MCU suitable for the intended temperature and voltage operating range."
+    },
+    {
+      "id": "PBDU-CON-002",
+      "text": "The PBDU shall use CAN communication according to the vehicle network architecture."
+    },
+    {
+      "id": "PBDU-CON-003",
+      "text": "The PBDU shall use Ethernet communication according to the vehicle network architecture."
+    },
+    {
+      "id": "PBDU-CON-004",
+      "text": "The PBDU shall support the number of power load channels defined by the system architecture."
+    },
+    {
+      "id": "PBDU-CON-005",
+      "text": "The PBDU shall fit within the mechanical envelope allocated for the power distribution unit."
+    },
+    {
+      "id": "PBDU-CON-006",
+      "text": "The PBDU shall use automotive-qualified connectors for power, sensor, CAN, and Ethernet interfaces."
+    },
+    {
+      "id": "PBDU-CON-007",
+      "text": "The PBDU shall comply with the project-defined coding guidelines for embedded software."
+    },
+    {
+      "id": "PBDU-NFR-001",
+      "text": "The PBDU shall complete system initialization within the project-defined startup time."
+    },
+    {
+      "id": "PBDU-NFR-002",
+      "text": "The PBDU shall update critical diagnostic information within the project-defined diagnostic monitoring cycle."
+    },
+    {
+      "id": "PBDU-NFR-003",
+      "text": "The PBDU shall detect and react to critical power output faults within the project-defined fault reaction time."
+    },
+    {
+      "id": "PBDU-NFR-004",
+      "text": "The PBDU shall maintain availability of unaffected power load channels when a fault is isolated to a single channel."
+    },
+    {
+      "id": "PBDU-NFR-005",
+      "text": "The PBDU shall support software diagnostics without preventing normal operation of unaffected functions."
+    },
+    {
+      "id": "PBDU-NFR-006",
+      "text": "The PBDU shall store diagnostic information in non-volatile memory when required by the diagnostic strategy."
+    },
+    {
+      "id": "PBDU-NFR-007",
+      "text": "The PBDU shall provide deterministic behavior for safety-relevant load control functions."
+    },
+    {
+      "id": "PBDU-NFR-008",
+      "text": "The PBDU shall support maintainability by providing clear diagnostic identifiers for monitored faults."
+    },
+    {
+      "id": "PBDU-MGMT-001",
+      "text": "Each system requirement shall have a unique identifier."
+    },
+    {
+      "id": "PBDU-MGMT-002",
+      "text": "Each system requirement shall be traceable to at least one stakeholder requirement or system feature."
+    },
+    {
+      "id": "PBDU-MGMT-003",
+      "text": "Each system requirement shall be traceable to at least one verification method."
+    },
+    {
+      "id": "PBDU-MGMT-004",
+      "text": "Each safety-related requirement shall be traceable to the corresponding hazard analysis or safety concept element."
+    },
+    {
+      "id": "PBDU-MGMT-005",
+      "text": "Each cybersecurity-related requirement shall be traceable to the corresponding threat analysis or cybersecurity concept element."
+    },
+    {
+      "id": "PBDU-MGMT-006",
+      "text": "Requirement changes shall be reviewed and approved before implementation."
+    },
+    {
+      "id": "PBDU-MGMT-007",
+      "text": "Requirement status shall be tracked using the project-defined lifecycle states."
+    },
+    {
+      "id": "PBDU-MGMT-008",
+      "text": "Requirement verification results shall be recorded and linked to the verified requirement."
+    }
+  ]
+}
