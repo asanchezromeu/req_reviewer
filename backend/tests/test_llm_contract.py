@@ -26,6 +26,31 @@ class ExtractJsonTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             extract_json("no json here")
 
+    def test_repairs_truncated_array_with_dangling_comma(self):
+        # A model that stops generating (or gets stuck in JSON-grammar-constrained
+        # decoding) partway through an array - a real failure mode observed live
+        # with gemma3:1b: complete, well-formed items followed by a dangling comma
+        # and no closing brackets at all.
+        raw = (
+            '{\n  "category": "Functional",\n  "sufficient": true,\n  "gaps": [\n'
+            '    {"item": "a", "why": "b"},\n'
+            '    {"item": "c", "why": "d"},\n'
+        )
+        self.assertEqual(
+            extract_json(raw),
+            {"category": "Functional", "sufficient": True, "gaps": [{"item": "a", "why": "b"}, {"item": "c", "why": "d"}]},
+        )
+
+    def test_repairs_truncated_object_without_trailing_comma(self):
+        raw = '{"category": "Electrical", "sufficient": false'
+        self.assertEqual(extract_json(raw), {"category": "Electrical", "sufficient": False})
+
+    def test_does_not_repair_when_braces_are_merely_out_of_order(self):
+        # Genuinely malformed JSON (not just truncated) should still raise, not
+        # get silently coerced into something that happens to parse.
+        with self.assertRaises(ValueError):
+            extract_json("not json at all, no braces here")
+
 
 class ReconcileByIdTests(unittest.TestCase):
     def test_all_present_and_valid_returned_in_expected_order(self):

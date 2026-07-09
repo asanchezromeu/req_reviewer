@@ -118,11 +118,14 @@ Return ONLY valid JSON, no markdown, no commentary, in this exact shape:
   "category": "<one of the given category names, or a short new one>",
   "sufficient": true | false,
   "gaps": [
-    {"item": "<specific missing thing>", "why": "<why the test case needs it>"}
+    {"item": "<specific missing thing, one short sentence>", "why": "<why the test case needs it, one short sentence>"}
   ]
 }
 
-"gaps" must be empty when sufficient is true, and non-empty when sufficient is false.
+If sufficient is true, "gaps" MUST be an empty array - do not list nice-to-have improvements once
+you've judged the context adequate. If sufficient is false, list at most the 3 most important gaps,
+not every conceivable one - one short sentence per item and why, not a paragraph. Being concise here
+matters as much as being right: a long list of verbose gaps is a worse answer than a short one.
 """
 
 

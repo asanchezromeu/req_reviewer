@@ -9,7 +9,42 @@ it must never be silently dropped or allowed to crash the caller.
 """
 
 import json
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Optional
+
+
+def _repair_truncated_brackets(candidate: str) -> Optional[str]:
+    """Close a JSON candidate that was cut off mid-structure (a model that stops
+    generating - or gets stuck in a JSON-grammar-constrained decoding loop - partway
+    through an array/object). Walks the string tracking open brackets outside of
+    string literals, drops a dangling trailing comma, and appends the closers needed
+    to balance what's still open. Returns None if nothing was actually unbalanced.
+    """
+    stack: List[str] = []
+    in_string = False
+    escape = False
+    for ch in candidate:
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch in "{[":
+            stack.append(ch)
+        elif ch in "}]":
+            if stack:
+                stack.pop()
+    if not stack:
+        return None
+    closers = {"{": "}", "[": "]"}
+    repaired = candidate.rstrip()
+    if repaired.endswith(","):
+        repaired = repaired[:-1]
+    return repaired + "".join(closers[ch] for ch in reversed(stack))
 
 
 def extract_json(text: str) -> Dict[str, Any]:
@@ -22,10 +57,20 @@ def extract_json(text: str) -> Dict[str, Any]:
             if first.lower().strip() in ("json", ""):
                 t = rest
     start = t.find("{")
-    end = t.rfind("}")
-    if start == -1 or end == -1 or end < start:
+    if start == -1:
         raise ValueError("No JSON object in response")
-    return json.loads(t[start : end + 1])
+    end = t.rfind("}")
+    # No closing brace at all is the most extreme case of the same truncation this
+    # is meant to repair - take everything from the opening brace to the end of the
+    # response rather than giving up immediately.
+    candidate = t[start : end + 1] if end != -1 and end >= start else t[start:]
+    try:
+        return json.loads(candidate)
+    except json.JSONDecodeError:
+        repaired = _repair_truncated_brackets(candidate)
+        if repaired is None:
+            raise
+        return json.loads(repaired)
 
 
 def reconcile_by_id(

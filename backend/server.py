@@ -313,7 +313,7 @@ async def llm_complete(
                     "model": model or os.environ.get("OLLAMA_MODEL", "gemma3:1b"),
                     "stream": False,
                     "format": "json",
-                    "options": {"temperature": 0.05, "num_ctx": 8192},
+                    "options": {"temperature": 0.05, "num_ctx": 8192, "num_predict": 2048},
                     "messages": [
                         {"role": "system", "content": system_message},
                         {"role": "user", "content": user_text},
