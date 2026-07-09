@@ -1,0 +1,354 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ReqIQ Test-Case Generation Console</title>
+<style>
+  body { font-family: -apple-system, Segoe UI, sans-serif; margin: 0; padding: 0; background: #0f1115; color: #e2e4e9; }
+  header { padding: 12px 20px; background: #171a21; border-bottom: 1px solid #2a2e38; display: flex; align-items: center; gap: 16px; }
+  header h1 { font-size: 15px; margin: 0; color: #9aa4b2; font-weight: 600; }
+  header input { background: #0f1115; border: 1px solid #2a2e38; color: #e2e4e9; padding: 4px 8px; border-radius: 4px; font-size: 12px; }
+  main { display: grid; grid-template-columns: 320px 1fr 340px; gap: 1px; background: #2a2e38; height: calc(100vh - 45px); }
+  section { background: #0f1115; overflow-y: auto; padding: 14px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em; color: #7d8494; margin: 0 0 10px; }
+  .req-item { padding: 8px; border-radius: 6px; cursor: pointer; font-size: 13px; margin-bottom: 4px; border: 1px solid transparent; }
+  .req-item:hover { background: #171a21; }
+  .req-item.selected { background: #1c2b3a; border-color: #3a6ea5; }
+  .req-id { color: #6fb1ff; font-weight: 600; font-size: 12px; }
+  .req-text { color: #b7bdc9; margin-top: 2px; }
+  input[type=text], textarea { width: 100%; box-sizing: border-box; background: #171a21; border: 1px solid #2a2e38; color: #e2e4e9; padding: 6px 8px; border-radius: 4px; font-size: 12px; margin-top: 4px; }
+  button { background: #2a5a8a; border: none; color: white; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; }
+  button:hover { background: #326a9f; }
+  button.secondary { background: #2a2e38; }
+  button.secondary:hover { background: #363c48; }
+  button.danger { background: #7a3030; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .row { display: flex; gap: 6px; align-items: center; margin-top: 6px; }
+  .card { background: #171a21; border: 1px solid #2a2e38; border-radius: 6px; padding: 10px; margin-bottom: 10px; font-size: 12px; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+  .badge.generated { background: #1e4620; color: #7ee08a; }
+  .badge.needs_input { background: #4a3a12; color: #f0c060; }
+  .badge.error { background: #4a1616; color: #f08080; }
+  ul { margin: 6px 0; padding-left: 18px; }
+  li { margin-bottom: 4px; }
+  .muted { color: #7d8494; font-size: 11px; }
+  .gap-card .gap-item { color: #f0c060; }
+  .gap-card .gap-why { color: #b7bdc9; font-size: 11px; margin: 4px 0; }
+  .ctx-item { display: flex; justify-content: space-between; gap: 6px; align-items: flex-start; padding: 6px 0; border-bottom: 1px solid #2a2e38; font-size: 12px; }
+  .ctx-item .key { color: #6fb1ff; }
+  a.link { color: #6fb1ff; cursor: pointer; text-decoration: underline; font-size: 11px; }
+  #status { font-size: 11px; color: #7d8494; }
+</style>
+</head>
+<body>
+<header>
+  <h1>ReqIQ &mdash; Test-Case Generation Console</h1>
+  <input id="apiKey" type="text" placeholder="API key (only if server requires one)" size="30">
+  <span id="status"></span>
+</header>
+<main>
+  <section id="reqPanel">
+    <h2>Requirements</h2>
+    <input id="reqFilter" type="text" placeholder="Filter by id or text...">
+    <div id="reqList" style="margin-top:8px;"></div>
+  </section>
+
+  <section id="genPanel">
+    <h2>Generate</h2>
+    <div id="selectedReq" class="muted">Select a requirement on the left.</div>
+    <div class="row">
+      <input id="provider" type="text" value="ollama" style="width:90px">
+      <input id="model" type="text" value="gemma3:1b" style="width:140px">
+      <button id="generateBtn" disabled>Generate test case</button>
+    </div>
+    <div id="genResult" style="margin-top:12px;"></div>
+
+    <h2 style="margin-top:20px;">Open gaps</h2>
+    <a class="link" onclick="loadGaps()">refresh</a>
+    <div id="gapsList" style="margin-top:8px;"></div>
+
+    <h2 style="margin-top:20px;">Generated test cases</h2>
+    <a class="link" onclick="loadTestCases()">refresh</a>
+    <div id="testCasesList" style="margin-top:8px;"></div>
+  </section>
+
+  <section id="ctxPanel">
+    <h2>Project test context</h2>
+    <button id="analyzeBtn">Run whole-set analysis</button>
+    <a class="link" onclick="loadContext()" style="margin-left:8px;">refresh</a>
+    <div id="ctxVersion" class="muted" style="margin-top:6px;"></div>
+    <div id="ctxItems" style="margin-top:8px;"></div>
+    <h2 style="margin-top:16px;">Open questions</h2>
+    <div id="ctxQuestions"></div>
+  </section>
+</main>
+
+<script>
+const API = '/api/v1';
+let requirements = [];
+let selectedReqId = null;
+
+function apiKey() { return document.getElementById('apiKey').value.trim(); }
+document.getElementById('apiKey').value = localStorage.getItem('reqiq_console_api_key') || '';
+document.getElementById('apiKey').addEventListener('change', e => localStorage.setItem('reqiq_console_api_key', e.target.value.trim()));
+
+async function api(path, options = {}) {
+  const headers = Object.assign({'Content-Type': 'application/json'}, options.headers || {});
+  const key = apiKey();
+  if (key) headers['Authorization'] = 'Bearer ' + key;
+  setStatus('Loading ' + path + ' ...');
+  try {
+    const res = await fetch(API + path, Object.assign({}, options, { headers }));
+    const text = await res.text();
+    const body = text ? JSON.parse(text) : null;
+    if (!res.ok) {
+      throw new Error((body && body.detail) ? JSON.stringify(body.detail) : ('HTTP ' + res.status));
+    }
+    setStatus('');
+    return body;
+  } catch (err) {
+    setStatus('Error: ' + err.message);
+    throw err;
+  }
+}
+
+function setStatus(msg) { document.getElementById('status').textContent = msg; }
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+async function loadRequirements() {
+  const data = await api('/requirements');
+  requirements = data.requirements || data || [];
+  renderRequirements();
+}
+
+function renderRequirements() {
+  const filter = document.getElementById('reqFilter').value.toLowerCase();
+  const list = document.getElementById('reqList');
+  list.innerHTML = '';
+  requirements
+    .filter(r => !filter || r.id.toLowerCase().includes(filter) || r.text.toLowerCase().includes(filter))
+    .forEach(r => {
+      const div = document.createElement('div');
+      div.className = 'req-item' + (r.id === selectedReqId ? ' selected' : '');
+      div.innerHTML = `<div class="req-id">${esc(r.id)}</div><div class="req-text">${esc(r.text)}</div>`;
+      div.onclick = () => selectRequirement(r);
+      list.appendChild(div);
+    });
+}
+
+function selectRequirement(r) {
+  selectedReqId = r.id;
+  document.getElementById('selectedReq').innerHTML = `<span class="req-id">${esc(r.id)}</span><br>${esc(r.text)}`;
+  document.getElementById('generateBtn').disabled = false;
+  document.getElementById('genResult').innerHTML = '';
+  renderRequirements();
+}
+
+document.getElementById('reqFilter').addEventListener('input', renderRequirements);
+
+document.getElementById('generateBtn').addEventListener('click', async () => {
+  if (!selectedReqId) return;
+  const btn = document.getElementById('generateBtn');
+  btn.disabled = true;
+  btn.textContent = 'Generating... (can take up to a minute)';
+  document.getElementById('genResult').innerHTML = '';
+  try {
+    const body = {
+      requirement_ids: [selectedReqId],
+      provider: document.getElementById('provider').value || 'ollama',
+      model: document.getElementById('model').value || 'gemma3:1b',
+    };
+    const data = await api('/testgen/generate', { method: 'POST', body: JSON.stringify(body) });
+    renderResult(data.results[0], document.getElementById('genResult'));
+    loadGaps();
+    loadTestCases();
+  } catch (err) {
+    document.getElementById('genResult').innerHTML = `<div class="card"><span class="badge error">error</span> ${esc(err.message)}</div>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Generate test case';
+  }
+});
+
+function renderResult(result, container) {
+  if (result.status === 'generated') {
+    const tc = result.test_case;
+    container.innerHTML = `
+      <div class="card">
+        <span class="badge generated">generated</span> category: ${esc(result.category)}
+        ${tc.review_flags && tc.review_flags.length ? ' &mdash; flags: ' + tc.review_flags.map(esc).join(', ') : ''}
+        <h3 style="font-size:12px;">Preconditions</h3><ul>${tc.preconditions.map(p => `<li>${esc(p)}</li>`).join('')}</ul>
+        <h3 style="font-size:12px;">Steps</h3><ul>${tc.steps.map(s => `<li>${esc(s)}</li>`).join('')}</ul>
+        <h3 style="font-size:12px;">Acceptance criteria</h3><ul>${tc.acceptance_criteria.map(a => `<li>${esc(a)}</li>`).join('')}</ul>
+        <div class="muted">verification: ${esc(tc.verification_method)}</div>
+        ${tc.assumptions && tc.assumptions.length ? '<h3 style="font-size:12px;">Assumptions</h3><ul>' + tc.assumptions.map(a => `<li>${esc(a.text)}: <b>${esc(a.value)}</b> (${esc(a.confidence)}) &mdash; ${esc(a.rationale)}</li>`).join('') + '</ul>' : ''}
+      </div>`;
+  } else {
+    container.innerHTML = `
+      <div class="card">
+        <span class="badge needs_input">needs_input</span> category: ${result.category ? esc(result.category) : '(none)'}
+        ${result.gaps.map(gapCardHtml).join('')}
+      </div>`;
+    wireGapForms(container);
+  }
+}
+
+function gapCardHtml(gap) {
+  return `
+    <div class="card gap-card">
+      <div class="gap-item">${esc(gap.item)}</div>
+      <div class="gap-why">${esc(gap.why)}</div>
+      <div class="muted">gap_id: ${esc(gap.gap_id)}</div>
+      <div class="row">
+        <input type="text" class="answer-input" placeholder="Provide the missing fact...">
+        <button class="answer-btn" data-gap="${esc(gap.gap_id)}">Answer</button>
+        <button class="fill-btn secondary" data-gap="${esc(gap.gap_id)}">Authorize fill</button>
+      </div>
+      <div class="resolve-result"></div>
+    </div>`;
+}
+
+function wireGapForms(root) {
+  root.querySelectorAll('.answer-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const card = btn.closest('.gap-card');
+      const answer = card.querySelector('.answer-input').value.trim();
+      if (!answer) return;
+      await resolveGap(btn.dataset.gap, 'answer', answer, card.querySelector('.resolve-result'));
+    });
+  });
+  root.querySelectorAll('.fill-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const card = btn.closest('.gap-card');
+      await resolveGap(btn.dataset.gap, 'authorize_fill', null, card.querySelector('.resolve-result'));
+    });
+  });
+}
+
+async function resolveGap(gapId, resolutionType, answer, resultEl) {
+  resultEl.innerHTML = '<span class="muted">resolving...</span>';
+  try {
+    const body = { gap_id: gapId, resolution_type: resolutionType };
+    if (answer) body.answer = answer;
+    // provider/model intentionally included; ollama_url intentionally omitted
+    // (never send it unless a real override is needed - see console header note).
+    body.provider = document.getElementById('provider').value || 'ollama';
+    body.model = document.getElementById('model').value || 'gemma3:1b';
+    const data = await api('/testgen/resolve', { method: 'POST', body: JSON.stringify(body) });
+    renderResult(data, resultEl);
+    loadGaps();
+    loadTestCases();
+  } catch (err) {
+    resultEl.innerHTML = `<span class="badge error">error</span> ${esc(err.message)}`;
+  }
+}
+
+async function loadGaps() {
+  const gaps = await api('/testgen/gaps?status=open');
+  const list = document.getElementById('gapsList');
+  if (!gaps.length) { list.innerHTML = '<div class="muted">No open gaps.</div>'; return; }
+  list.innerHTML = gaps.map(g => `
+    <div class="card gap-card">
+      <div class="muted">${esc(g.requirement_id)} &mdash; ${esc(g.gap_source)}</div>
+      <div class="gap-item">${esc(g.item)}</div>
+      <div class="gap-why">${esc(g.why)}</div>
+      <div class="muted">gap_id: ${esc(g.id)}</div>
+      <div class="row">
+        <input type="text" class="answer-input" placeholder="Provide the missing fact...">
+        <button class="answer-btn" data-gap="${esc(g.id)}">Answer</button>
+        <button class="fill-btn secondary" data-gap="${esc(g.id)}">Authorize fill</button>
+      </div>
+      <div class="resolve-result"></div>
+    </div>`).join('');
+  wireGapForms(list);
+}
+
+async function loadTestCases() {
+  const cases = await api('/testgen/testcases');
+  const list = document.getElementById('testCasesList');
+  if (!cases.length) { list.innerHTML = '<div class="muted">None yet.</div>'; return; }
+  list.innerHTML = cases.map(tc => `
+    <div class="card">
+      <div class="req-id">${tc.requirement_ids.join(', ')}</div>
+      <div class="muted">${esc(tc.category)} / ${esc(tc.verification_method)}</div>
+    </div>`).join('');
+}
+
+document.getElementById('analyzeBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('analyzeBtn');
+  btn.disabled = true;
+  btn.textContent = 'Analyzing... (whole set, can take a while)';
+  try {
+    await api('/testgen/context/analyze', {
+      method: 'POST',
+      body: JSON.stringify({
+        provider: document.getElementById('provider').value || 'ollama',
+        model: document.getElementById('model').value || 'gemma3:1b',
+      }),
+    });
+    await loadContext();
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Run whole-set analysis';
+  }
+});
+
+async function loadContext() {
+  let ctx;
+  try {
+    ctx = await api('/testgen/context');
+  } catch (err) {
+    document.getElementById('ctxVersion').textContent = 'No context yet.';
+    document.getElementById('ctxItems').innerHTML = '';
+    document.getElementById('ctxQuestions').innerHTML = '';
+    return;
+  }
+  document.getElementById('ctxVersion').textContent = 'version ' + ctx.version + ' (' + ctx.items.length + ' items)';
+  document.getElementById('ctxItems').innerHTML = ctx.items.map(item => `
+    <div class="ctx-item">
+      <div><span class="key">[${esc(item.category)}] ${esc(item.key)}</span>: ${esc(item.value)}</div>
+      <div style="white-space:nowrap;">
+        <a class="link" onclick="editItem('${item.id}', ${JSON.stringify(item.value)})">edit</a>
+        <a class="link" onclick="removeItem('${item.id}')">remove</a>
+      </div>
+    </div>`).join('');
+  document.getElementById('ctxQuestions').innerHTML = (ctx.questions || [])
+    .filter(q => q.status === 'open')
+    .map(q => `
+      <div class="card">
+        <div>${esc(q.question)}</div>
+        <div class="muted">${esc(q.reason)}</div>
+        <div class="row">
+          <input type="text" id="qanswer-${q.id}" placeholder="Answer...">
+          <button onclick="answerQuestion('${q.id}')">Submit</button>
+        </div>
+      </div>`).join('') || '<div class="muted">No open questions.</div>';
+}
+
+async function editItem(id, currentValue) {
+  const value = prompt('New value:', currentValue);
+  if (value === null) return;
+  await api('/testgen/context', { method: 'PATCH', body: JSON.stringify({ item_updates: [{ id, value }] }) });
+  loadContext();
+}
+
+async function removeItem(id) {
+  if (!confirm('Remove this context item?')) return;
+  await api('/testgen/context', { method: 'PATCH', body: JSON.stringify({ item_removals: [id] }) });
+  loadContext();
+}
+
+async function answerQuestion(questionId) {
+  const answer = document.getElementById('qanswer-' + questionId).value.trim();
+  if (!answer) return;
+  await api('/testgen/context', { method: 'PATCH', body: JSON.stringify({ question_answers: [{ question_id: questionId, answer }] }) });
+  loadContext();
+}
+
+loadRequirements();
+loadContext();
+loadGaps();
+loadTestCases();
+</script>
+</body>
+</html>

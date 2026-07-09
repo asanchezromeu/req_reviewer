@@ -11,7 +11,7 @@ from typing import List, Optional, Dict, Any
 
 import requests
 from fastapi import Depends, FastAPI, APIRouter, HTTPException, UploadFile, File, Form
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, Response, FileResponse
 from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -1783,6 +1783,16 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.get("/testgen-console", include_in_schema=False)
+async def testgen_console():
+    # Lightweight, dependency-free dev tool for exercising the test-case-generation
+    # endpoints without /docs's raw-JSON Swagger forms (no build step, no framework -
+    # mirrors the legacy Node prototype's plain-JS approach). Not part of the main
+    # React frontend; testgen has no tab there yet.
+    return FileResponse(ROOT_DIR / "static" / "testgen_console.html")
+
 
 frontend_build = ROOT_DIR.parent / "frontend" / "build"
 if frontend_build.exists():
