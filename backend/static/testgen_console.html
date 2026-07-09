@@ -170,18 +170,25 @@ document.getElementById('generateBtn').addEventListener('click', async () => {
   }
 });
 
+function testCaseBodyHtml(tc, category) {
+  return `
+    category: ${esc(category)}
+    ${tc.review_flags && tc.review_flags.length ? ' &mdash; flags: ' + tc.review_flags.map(esc).join(', ') : ''}
+    <h3 style="font-size:12px;">Preconditions</h3><ul>${tc.preconditions.map(p => `<li>${esc(p)}</li>`).join('')}</ul>
+    <h3 style="font-size:12px;">Steps</h3><ul>${tc.steps.map(s => `<li>${esc(s)}</li>`).join('')}</ul>
+    <h3 style="font-size:12px;">Acceptance criteria</h3><ul>${tc.acceptance_criteria.map(a => `<li>${esc(a)}</li>`).join('')}</ul>
+    <div class="muted">verification: ${esc(tc.verification_method)}</div>
+    ${tc.assumptions && tc.assumptions.length ? '<h3 style="font-size:12px;">Assumptions</h3><ul>' + tc.assumptions.map(a => `<li>${esc(a.text)}: <b>${esc(a.value)}</b> (${esc(a.confidence)}) &mdash; ${esc(a.rationale)}</li>`).join('') + '</ul>' : ''}
+  `;
+}
+
 function renderResult(result, container) {
   if (result.status === 'generated') {
     const tc = result.test_case;
     container.innerHTML = `
       <div class="card">
-        <span class="badge generated">generated</span> category: ${esc(result.category)}
-        ${tc.review_flags && tc.review_flags.length ? ' &mdash; flags: ' + tc.review_flags.map(esc).join(', ') : ''}
-        <h3 style="font-size:12px;">Preconditions</h3><ul>${tc.preconditions.map(p => `<li>${esc(p)}</li>`).join('')}</ul>
-        <h3 style="font-size:12px;">Steps</h3><ul>${tc.steps.map(s => `<li>${esc(s)}</li>`).join('')}</ul>
-        <h3 style="font-size:12px;">Acceptance criteria</h3><ul>${tc.acceptance_criteria.map(a => `<li>${esc(a)}</li>`).join('')}</ul>
-        <div class="muted">verification: ${esc(tc.verification_method)}</div>
-        ${tc.assumptions && tc.assumptions.length ? '<h3 style="font-size:12px;">Assumptions</h3><ul>' + tc.assumptions.map(a => `<li>${esc(a.text)}: <b>${esc(a.value)}</b> (${esc(a.confidence)}) &mdash; ${esc(a.rationale)}</li>`).join('') + '</ul>' : ''}
+        <span class="badge generated">generated</span>
+        ${testCaseBodyHtml(tc, result.category)}
       </div>`;
   } else {
     container.innerHTML = `
@@ -267,11 +274,15 @@ async function loadTestCases() {
   const cases = await api('/testgen/testcases');
   const list = document.getElementById('testCasesList');
   if (!cases.length) { list.innerHTML = '<div class="muted">None yet.</div>'; return; }
+  cases.sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
   list.innerHTML = cases.map(tc => `
-    <div class="card">
-      <div class="req-id">${tc.requirement_ids.join(', ')}</div>
-      <div class="muted">${esc(tc.category)} / ${esc(tc.verification_method)}</div>
-    </div>`).join('');
+    <details class="card">
+      <summary style="cursor:pointer;">
+        <span class="req-id">${esc(tc.requirement_ids.join(', '))}</span>
+        <span class="muted">&mdash; ${esc(tc.category)} / ${esc(tc.verification_method)} &mdash; ${esc(tc.created_at)}</span>
+      </summary>
+      ${testCaseBodyHtml(tc, tc.category)}
+    </details>`).join('');
 }
 
 document.getElementById('analyzeBtn').addEventListener('click', async () => {
