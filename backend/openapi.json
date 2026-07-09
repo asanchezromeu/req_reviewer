@@ -167,6 +167,19 @@
         "title": "Body_upload_dataset_api_v1_training_datasets_post",
         "type": "object"
       },
+      "CategoryStrategyBody": {
+        "properties": {
+          "instructions": {
+            "title": "Instructions",
+            "type": "string"
+          }
+        },
+        "required": [
+          "instructions"
+        ],
+        "title": "CategoryStrategyBody",
+        "type": "object"
+      },
       "ClassifyBody": {
         "properties": {
           "categories": {
@@ -453,6 +466,47 @@
           "candidate_model"
         ],
         "title": "EvaluateBody",
+        "type": "object"
+      },
+      "GenerateBody": {
+        "properties": {
+          "model": {
+            "default": "gemma3:1b",
+            "title": "Model",
+            "type": "string"
+          },
+          "ollama_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ollama Url"
+          },
+          "provider": {
+            "default": "ollama",
+            "title": "Provider",
+            "type": "string"
+          },
+          "requirement_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requirement Ids"
+          }
+        },
+        "title": "GenerateBody",
         "type": "object"
       },
       "HTTPValidationError": {
@@ -2220,6 +2274,107 @@
         ]
       }
     },
+    "/api/testgen/category-strategies": {
+      "get": {
+        "deprecated": true,
+        "operationId": "list_category_strategies_api_testgen_category_strategies_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Category Strategies"
+      }
+    },
+    "/api/testgen/category-strategies/{category}": {
+      "delete": {
+        "deprecated": true,
+        "operationId": "delete_category_strategy_api_testgen_category_strategies__category__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "category",
+            "required": true,
+            "schema": {
+              "title": "Category",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Category Strategy"
+      },
+      "put": {
+        "deprecated": true,
+        "operationId": "set_category_strategy_api_testgen_category_strategies__category__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "category",
+            "required": true,
+            "schema": {
+              "title": "Category",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CategoryStrategyBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Category Strategy"
+      }
+    },
     "/api/testgen/context": {
       "get": {
         "deprecated": true,
@@ -2352,6 +2507,88 @@
           }
         },
         "summary": "Get Test Context Questions"
+      }
+    },
+    "/api/testgen/generate": {
+      "post": {
+        "deprecated": true,
+        "operationId": "generate_test_cases_api_testgen_generate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GenerateBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Generate Test Cases"
+      }
+    },
+    "/api/testgen/testcases": {
+      "get": {
+        "deprecated": true,
+        "operationId": "list_test_cases_api_testgen_testcases_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "requirement_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Requirement Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Test Cases"
       }
     },
     "/api/training/datasets": {
@@ -3878,6 +4115,119 @@
         ]
       }
     },
+    "/api/v1/testgen/category-strategies": {
+      "get": {
+        "operationId": "list_category_strategies_api_v1_testgen_category_strategies_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Category Strategies"
+      }
+    },
+    "/api/v1/testgen/category-strategies/{category}": {
+      "delete": {
+        "operationId": "delete_category_strategy_api_v1_testgen_category_strategies__category__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "category",
+            "required": true,
+            "schema": {
+              "title": "Category",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Category Strategy"
+      },
+      "put": {
+        "operationId": "set_category_strategy_api_v1_testgen_category_strategies__category__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "category",
+            "required": true,
+            "schema": {
+              "title": "Category",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CategoryStrategyBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Set Category Strategy"
+      }
+    },
     "/api/v1/testgen/context": {
       "get": {
         "operationId": "get_test_context_api_v1_testgen_context_get",
@@ -4026,6 +4376,96 @@
           }
         ],
         "summary": "Get Test Context Questions"
+      }
+    },
+    "/api/v1/testgen/generate": {
+      "post": {
+        "operationId": "generate_test_cases_api_v1_testgen_generate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GenerateBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Generate Test Cases"
+      }
+    },
+    "/api/v1/testgen/testcases": {
+      "get": {
+        "operationId": "list_test_cases_api_v1_testgen_testcases_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "requirement_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Requirement Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Test Cases"
       }
     },
     "/api/v1/training/datasets": {

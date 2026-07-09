@@ -34,7 +34,12 @@ try:
     from .llm_contract import extract_json
     from . import deterministic_review
     from . import model_registry
-    from .testgen_prompts import CONTEXT_ANALYSIS_PROMPT
+    from .testgen_prompts import (
+        CONTEXT_ANALYSIS_PROMPT,
+        DEFAULT_CATEGORY_STRATEGIES,
+        CLASSIFY_AND_ASSESS_PROMPT,
+        GENERATE_TEST_CASE_PROMPT,
+    )
 except ImportError:
     from incose_rules import (
         INCOSE_RULES,
@@ -47,7 +52,12 @@ except ImportError:
     from llm_contract import extract_json
     import deterministic_review
     import model_registry
-    from testgen_prompts import CONTEXT_ANALYSIS_PROMPT
+    from testgen_prompts import (
+        CONTEXT_ANALYSIS_PROMPT,
+        DEFAULT_CATEGORY_STRATEGIES,
+        CLASSIFY_AND_ASSESS_PROMPT,
+        GENERATE_TEST_CASE_PROMPT,
+    )
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
@@ -108,6 +118,8 @@ class MemoryDatabase:
         self.distillation_jobs = MemoryCollection()
         self.model_registry = MemoryCollection()
         self.test_context_versions = MemoryCollection()
+        self.category_strategies = MemoryCollection()
+        self.test_cases = MemoryCollection()
 
 
 def _matches_query(document: Dict[str, Any], query: Dict[str, Any]) -> bool:
@@ -1171,6 +1183,169 @@ async def get_current_test_context() -> Optional[Dict[str, Any]]:
     cursor = db.test_context_versions.find({}, {"_id": 0}).sort("version", -1)
     docs = await cursor.to_list(1)
     return docs[0] if docs else None
+
+
+# ----- Test generation: category strategies + generation (SPEC-ADDENDUM-A, Stage B) -----
+# Verdict 2 self-review, assumption marking, and /testgen/resolve are Stage C, not built yet.
+
+class CategoryStrategyBody(BaseModel):
+    instructions: str
+
+
+class GenerateBody(BaseModel):
+    requirement_ids: Optional[List[str]] = None
+    provider: str = "ollama"
+    model: str = "gemma3:1b"
+    ollama_url: Optional[str] = None
+
+
+class TestCase(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    requirement_ids: List[str]
+    category: str
+    category_source: str = "engine-assigned"
+    preconditions: List[str] = []
+    steps: List[str] = []
+    acceptance_criteria: List[str] = []
+    verification_method: str = "test"
+    review_flags: List[str] = []
+    assumptions: List[Dict[str, Any]] = []
+    context_version: Optional[int] = None
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+
+async def get_category_strategies() -> Dict[str, str]:
+    strategies = dict(DEFAULT_CATEGORY_STRATEGIES)
+    cursor = db.category_strategies.find({}, {"_id": 0})
+    for doc in await cursor.to_list(500):
+        strategies[doc["category"]] = doc["instructions"]
+    return strategies
+
+
+@api.get("/testgen/category-strategies")
+async def list_category_strategies():
+    strategies = await get_category_strategies()
+    return [{"category": category, "instructions": instructions} for category, instructions in strategies.items()]
+
+
+@api.put("/testgen/category-strategies/{category}")
+async def set_category_strategy(category: str, body: CategoryStrategyBody):
+    existing = await db.category_strategies.find_one({"category": category})
+    entry = {"category": category, "instructions": body.instructions}
+    if existing:
+        await db.category_strategies.update_one({"category": category}, {"$set": entry})
+    else:
+        await db.category_strategies.insert_one(entry)
+    return entry
+
+
+@api.delete("/testgen/category-strategies/{category}")
+async def delete_category_strategy(category: str):
+    res = await db.category_strategies.delete_one({"category": category})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="No stored override for this category")
+    return {"deleted": True}
+
+
+def _context_listing(context: Optional[Dict[str, Any]]) -> str:
+    if not context or not context.get("items"):
+        return "(no project test context yet)"
+    return "\n".join(f"[{item['category']}] {item['key']}: {item['value']}" for item in context["items"])
+
+
+@api.post("/testgen/generate")
+async def generate_test_cases(body: GenerateBody):
+    all_requirements = await asyncio.to_thread(requirements_store.list_requirements)
+    if body.requirement_ids is not None:
+        wanted = set(body.requirement_ids)
+        requirements = [r for r in all_requirements if r["id"] in wanted]
+    else:
+        requirements = all_requirements
+    if not requirements:
+        raise HTTPException(status_code=400, detail="No matching requirements to generate for")
+
+    strategies = await get_category_strategies()
+    context = await get_current_test_context()
+    context_listing = _context_listing(context)
+    context_version = context["version"] if context else None
+    category_listing = "\n".join(f"- {name}: {instructions}" for name, instructions in strategies.items())
+
+    sem = asyncio.Semaphore(8)
+
+    async def process(requirement: Dict[str, Any]) -> Dict[str, Any]:
+        async with sem:
+            req_id = requirement["id"]
+            req_text = requirement["text"]
+            assess_user_message = (
+                f"Requirement: [{req_id}] {req_text}\n\n"
+                f"Known categories:\n{category_listing}\n\n"
+                f"Project test context:\n{context_listing}"
+            )
+            try:
+                raw = await llm_complete(
+                    body.provider, body.model, CLASSIFY_AND_ASSESS_PROMPT, assess_user_message, body.ollama_url
+                )
+                assessment = extract_json(raw)
+                category = str(assessment.get("category", "")).strip() or "Functional"
+                sufficient = bool(assessment.get("sufficient"))
+                gaps = assessment.get("gaps", []) or []
+            except Exception as exc:
+                logger.exception("testgen classify/assess failed")
+                return {
+                    "requirement_id": req_id,
+                    "status": "needs_input",
+                    "category": None,
+                    "gaps": [{"item": "analysis failed", "why": str(exc)}],
+                }
+
+            if not sufficient:
+                return {"requirement_id": req_id, "status": "needs_input", "category": category, "gaps": gaps}
+
+            strategy_instructions = strategies.get(category, "Use sound test-engineering judgement for this category.")
+            generate_user_message = (
+                f"Requirement: [{req_id}] {req_text}\n\n"
+                f"Category: {category}\n"
+                f"Category strategy: {strategy_instructions}\n\n"
+                f"Project test context:\n{context_listing}"
+            )
+            try:
+                raw = await llm_complete(
+                    body.provider, body.model, GENERATE_TEST_CASE_PROMPT, generate_user_message, body.ollama_url
+                )
+                generated = extract_json(raw)
+            except Exception as exc:
+                logger.exception("testgen generation failed")
+                return {
+                    "requirement_id": req_id,
+                    "status": "needs_input",
+                    "category": category,
+                    "gaps": [{"item": "generation failed", "why": str(exc)}],
+                }
+
+            test_case = TestCase(
+                requirement_ids=[req_id],
+                category=category,
+                preconditions=[str(x) for x in generated.get("preconditions", []) or []],
+                steps=[str(x) for x in generated.get("steps", []) or []],
+                acceptance_criteria=[str(x) for x in generated.get("acceptance_criteria", []) or []],
+                verification_method=str(generated.get("verification_method", "test")),
+                review_flags=["safety"] if category == "Safety-related" else [],
+                context_version=context_version,
+            )
+            await db.test_cases.insert_one(test_case.model_dump())
+            return {"requirement_id": req_id, "status": "generated", "category": category, "test_case": test_case}
+
+    results = await asyncio.gather(*(process(r) for r in requirements))
+    return {"results": results}
+
+
+@api.get("/testgen/testcases")
+async def list_test_cases(requirement_id: Optional[str] = None):
+    cursor = db.test_cases.find({}, {"_id": 0}).sort("created_at", -1)
+    docs = await cursor.to_list(1000)
+    if requirement_id:
+        docs = [doc for doc in docs if requirement_id in doc.get("requirement_ids", [])]
+    return docs
 
 
 @api.post("/datasets/export")

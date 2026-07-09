@@ -43,6 +43,15 @@ class ReferenceIngestionRouteTests(unittest.TestCase):
         self.client = TestClient(app)
 
     def tearDown(self):
+        # Background IndexCoordinator threads hold a SQLite connection open
+        # while running; if one is still mid-index when the temp dir is
+        # cleaned up, Windows can't delete the file (PermissionError). Wait
+        # for both coordinators to go idle first.
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            if not self.router.indexer.running and not self.router.reference_indexer.running:
+                break
+            time.sleep(0.02)
         self.temp_dir.cleanup()
 
     def _wait_for_reference_index_ready(self, timeout=5):

@@ -1,6 +1,7 @@
 import asyncio
 import json
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -146,6 +147,14 @@ class SearchCardinalityRouteTests(unittest.TestCase):
         self.router.store.replace_requirements(rows)
 
     def tearDown(self):
+        # See test_reference_ingestion.py's tearDown for why this wait exists -
+        # a still-running background IndexCoordinator thread can hold the
+        # SQLite file open past the temp dir cleanup on Windows.
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            if not self.router.indexer.running and not self.router.reference_indexer.running:
+                break
+            time.sleep(0.02)
         self.temp_dir.cleanup()
 
     def _search(self, verdict_payload):

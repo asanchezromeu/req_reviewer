@@ -40,11 +40,8 @@ python -m unittest backend.tests.test_retrieval backend.tests.test_conflict_prec
   backend.tests.test_reference_kb backend.tests.test_reference_ingestion \
   backend.tests.test_model_registry backend.tests.test_dataset_export \
   backend.tests.test_model_registry_routes backend.tests.test_model_evaluate \
-  backend.tests.test_testgen_context -v
+  backend.tests.test_testgen_context backend.tests.test_testgen_generation -v
   # ^ all stdlib+fastapi TestClient only, no live server or Ollama needed (LLM calls are mocked).
-  # Note: test_search_verification.py / test_reference_ingestion.py have a known intermittent
-  # Windows-only PermissionError on tempdir cleanup (a background IndexCoordinator thread racing
-  # SQLite file handle release) - rerun if you hit it, it's a teardown flake, not a test failure.
 pytest backend/tests/test_reqiq_api.py     # hits a running server; BASE_URL/REACT_APP_BACKEND_URL env, defaults to http://localhost:8000
 pytest backend/tests/test_reqiq_iter2.py
 python -m backend.export_openapi           # regenerate backend/openapi.json after any route change
@@ -155,31 +152,53 @@ python -m unittest tests.test_req_analysis -v
     `degraded_count` — how often each model's result fell back to the deterministic scorer via
     `analyze_one`'s existing `fallback` marker, so a misleadingly-similar comparison caused by both
     models hitting that fallback is visible rather than hidden.
-- **Test-case generation, Stage A only (Phase 6, `SPEC-ADDENDUM-A.md`)** — the "project test
-  context" (addendum A.2): whole-set analysis + elicitation, versioned. Only this stage is built;
-  category-aware generation, the two-verdict sufficiency gate, assumption marking, and the
-  resolve/regenerate loop (addendum A.3–A.5) are **not implemented yet**.
+- **Test-case generation, Stages A+B (Phase 6, `SPEC-ADDENDUM-A.md`)** — project test context
+  (A.2) and category-aware generation with the sufficiency gate (A.3–A.4's Verdict 1 only).
+  **Verdict 2 (anti-genericity self-review), real assumption marking, and `POST /testgen/resolve`
+  (A.4–A.5) are Stage C — not implemented yet.**
+  - Confirmed decisions (previously defaulted, now settled): a test case's `requirement_ids` is a
+    list (many-to-many capable — the engine does not auto-group requirements into one test case,
+    but the schema supports a human doing so during review); the addendum's 7 categories are the
+    built-in defaults but every category's guidance is stored and user-editable, and new category
+    names can be added; Safety-related requirements always generate with `review_flags: ["safety"]`
+    rather than being excluded.
   - `POST /testgen/context/analyze` sends every stored requirement plus any ingested reference
     chunks to the LLM (`backend/testgen_prompts.py`'s `CONTEXT_ANALYSIS_PROMPT`) and gets back
     `items` (operating modes, parameters+tolerances, interfaces, environmental conditions,
     terminology, categories present — each tagged with `source_requirement_ids`) and `questions`
     (things it couldn't infer, each with a `reason`). On malformed LLM output it degrades to an
     empty-items context with one system question flagging the failure — never crashes, never
-    fabricates items.
-  - Storage is a new `db.model_registry`-style collection, `db.test_context_versions`: every
-    analyze/patch call **inserts a new version** rather than mutating in place (`get_current_test_context`
-    reads the highest `version`), so old versions are retained — needed later so a generated test
-    case can record which context version it was built against.
-  - `GET /testgen/context` (404 until the first analyze), `PATCH /testgen/context` (apply
-    `item_updates`/`new_items`/`question_answers`, bump the version — answering a question also
-    appends a derived context item, so it's available to future generation), `GET
-    /testgen/context/questions` (optional `?status=open|answered` filter).
-  - **Three open decisions from the addendum were defaulted, not confirmed** (the user was
-    unavailable when asked): 1 requirement → N test cases (not M:N) for the future test-case
-    schema; use the addendum's own 7-category taxonomy; safety-related requirements get
-    auto-generated with a mandatory-review flag rather than being excluded. None of these affect
-    Stage A's shape directly, but they'll shape Stage B (category-aware generation) — confirm
-    before building that stage.
+    fabricates items. Storage is `db.test_context_versions`: every analyze/patch call **inserts a
+    new version** rather than mutating in place (`get_current_test_context` reads the highest
+    `version`), so old versions are retained — a generated test case records which context version
+    it was built against. `GET /testgen/context` (404 until the first analyze), `PATCH
+    /testgen/context` (apply `item_updates`/`new_items`/`question_answers`, bump the version —
+    answering a question also appends a derived context item), `GET /testgen/context/questions`
+    (optional `?status=open|answered` filter).
+  - `GET/PUT/DELETE /testgen/category-strategies[/{category}]` — same "defaults + override" pattern
+    as `/models/registry` (Phase 5): `backend/testgen_prompts.py`'s `DEFAULT_CATEGORY_STRATEGIES`
+    (the 7 built-ins, transcribed from the addendum's A.3 table) plus any stored override/custom
+    category in `db.category_strategies`. `DELETE` reverts a built-in to its default text, or
+    removes a fully custom category.
+  - `POST /testgen/generate` (`requirement_ids: Optional[List[str]]`, defaults to every stored
+    requirement; bounded `asyncio.Semaphore(8)` concurrency, same pattern as `review_set_endpoint`/
+    `evaluate_model`) — two LLM calls per requirement, not three. Requirements have no stored
+    `category` field (`Requirement` in `retrieval.py` is just `id/text/source`), so classification
+    happens on the fly every call. Call 1 (`CLASSIFY_AND_ASSESS_PROMPT`) combines classification and
+    Verdict 1 in one judgment: given the requirement, the known categories + their strategy text,
+    and the current project test context, returns `{category, sufficient, gaps}`. If insufficient,
+    the result is `{status: "needs_input", gaps}` — no test case generated; the manual retry path
+    today is `PATCH /testgen/context` to add the missing info, then call `/testgen/generate` again
+    (Stage C's `/testgen/resolve` doesn't exist yet). If sufficient, call 2
+    (`GENERATE_TEST_CASE_PROMPT`) generates `{preconditions, steps, acceptance_criteria,
+    verification_method}` — the category's strategy text itself tells the model what shape to
+    produce (e.g. Non-testable-by-test's strategy says to propose a verification method and a
+    checklist instead of test steps), so **one schema/prompt covers testable and non-testable
+    categories with no hardcoded Python branch for that case** — generalizing the mechanism instead
+    of special-casing it. Both calls degrade to `needs_input` on malformed JSON, never crash.
+    Generated test cases persist to `db.test_cases`; batch results are always a mixed
+    `generated`/`needs_input` list per requirement — one failure never blocks the rest.
+  - `GET /testgen/testcases` (optional `?requirement_id=` filter).
 
 **`backend/retrieval.py`** (renamed from `showcase.py` in Phase 1 — this is now "the" requirements
 store, not a demo-specific module) is self-contained: its own SQLite store, embeddings, and search
