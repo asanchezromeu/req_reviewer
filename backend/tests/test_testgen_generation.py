@@ -33,7 +33,7 @@ class TestgenGenerationTests(unittest.TestCase):
     def tearDown(self):
         self.store_patcher.stop()
         self.temp_dir.cleanup()
-        for collection in (server.db.category_strategies, server.db.test_cases):
+        for collection in (server.db.category_strategies, server.db.test_cases, server.db.test_gaps):
             for doc in run(collection.find({}, {"_id": 0}).to_list(1000)):
                 key = "category" if "category" in doc else "id"
                 run(collection.delete_one({key: doc[key]}))
@@ -95,7 +95,7 @@ class TestgenGenerationTests(unittest.TestCase):
         fake = self._fake_llm(
             assess_response={"category": "Performance / timing", "sufficient": True, "gaps": []},
             generate_response={
-                "preconditions": ["Bench with regulated PSU at 12 V."],
+                "preconditions": ["Nominal load applied to the zone controller."],
                 "steps": ["Send diagnostic request.", "Measure response time."],
                 "acceptance_criteria": ["Response time <= 200 ms."],
                 "verification_method": "test",
@@ -167,7 +167,7 @@ class TestgenGenerationTests(unittest.TestCase):
             generate_response={
                 "preconditions": ["CAN bus connected and operating."],
                 "steps": ["Disconnect CAN bus.", "Observe safe-state entry."],
-                "acceptance_criteria": ["Safe state entered within 100 ms."],
+                "acceptance_criteria": ["Safe state is entered, verified by monitoring the safe-state output signal."],
                 "verification_method": "test",
             },
         )
@@ -200,7 +200,7 @@ class TestgenGenerationTests(unittest.TestCase):
                 {
                     "preconditions": ["p"],
                     "steps": ["s"],
-                    "acceptance_criteria": ["a"],
+                    "acceptance_criteria": ["Response time <= 200 ms."],
                     "verification_method": "test",
                 }
             )
@@ -228,15 +228,27 @@ class TestgenGenerationTests(unittest.TestCase):
                 ("REQ-002", "The zone controller shall log all failures."),
             ]
         )
-        fake = self._fake_llm(
-            assess_response={"category": "Functional", "sufficient": True, "gaps": []},
-            generate_response={
-                "preconditions": ["p"],
-                "steps": ["s"],
-                "acceptance_criteria": ["a"],
-                "verification_method": "test",
-            },
-        )
+
+        async def fake(provider, model, sys_msg, user, ollama_url=None):
+            if sys_msg == CLASSIFY_AND_ASSESS_PROMPT:
+                return json.dumps({"category": "Functional", "sufficient": True, "gaps": []})
+            if "REQ-001" in user:
+                return json.dumps(
+                    {
+                        "preconditions": ["p"],
+                        "steps": ["s"],
+                        "acceptance_criteria": ["Response time <= 200 ms."],
+                        "verification_method": "test",
+                    }
+                )
+            return json.dumps(
+                {
+                    "preconditions": ["p"],
+                    "steps": ["s"],
+                    "acceptance_criteria": ["All failures appear in the log."],
+                    "verification_method": "test",
+                }
+            )
 
         with patch.object(server, "llm_complete", fake):
             run(server.generate_test_cases(server.GenerateBody()))

@@ -40,7 +40,8 @@ python -m unittest backend.tests.test_retrieval backend.tests.test_conflict_prec
   backend.tests.test_reference_kb backend.tests.test_reference_ingestion \
   backend.tests.test_model_registry backend.tests.test_dataset_export \
   backend.tests.test_model_registry_routes backend.tests.test_model_evaluate \
-  backend.tests.test_testgen_context backend.tests.test_testgen_generation -v
+  backend.tests.test_testgen_context backend.tests.test_testgen_generation \
+  backend.tests.test_testgen_resolve -v
   # ^ all stdlib+fastapi TestClient only, no live server or Ollama needed (LLM calls are mocked).
 pytest backend/tests/test_reqiq_api.py     # hits a running server; BASE_URL/REACT_APP_BACKEND_URL env, defaults to http://localhost:8000
 pytest backend/tests/test_reqiq_iter2.py
@@ -152,10 +153,9 @@ python -m unittest tests.test_req_analysis -v
     `degraded_count` — how often each model's result fell back to the deterministic scorer via
     `analyze_one`'s existing `fallback` marker, so a misleadingly-similar comparison caused by both
     models hitting that fallback is visible rather than hidden.
-- **Test-case generation, Stages A+B (Phase 6, `SPEC-ADDENDUM-A.md`)** — project test context
-  (A.2) and category-aware generation with the sufficiency gate (A.3–A.4's Verdict 1 only).
-  **Verdict 2 (anti-genericity self-review), real assumption marking, and `POST /testgen/resolve`
-  (A.4–A.5) are Stage C — not implemented yet.**
+- **Test-case generation, Phase 6 (`SPEC-ADDENDUM-A.md`), all stages A–C complete** — project test
+  context (A.2), category-aware generation with the two-verdict sufficiency gate (A.3–A.4), and the
+  resolve/regenerate loop (A.5).
   - Confirmed decisions (previously defaulted, now settled): a test case's `requirement_ids` is a
     list (many-to-many capable — the engine does not auto-group requirements into one test case,
     but the schema supports a human doing so during review); the addendum's 7 categories are the
@@ -182,23 +182,50 @@ python -m unittest tests.test_req_analysis -v
     removes a fully custom category.
   - `POST /testgen/generate` (`requirement_ids: Optional[List[str]]`, defaults to every stored
     requirement; bounded `asyncio.Semaphore(8)` concurrency, same pattern as `review_set_endpoint`/
-    `evaluate_model`) — two LLM calls per requirement, not three. Requirements have no stored
-    `category` field (`Requirement` in `retrieval.py` is just `id/text/source`), so classification
-    happens on the fly every call. Call 1 (`CLASSIFY_AND_ASSESS_PROMPT`) combines classification and
-    Verdict 1 in one judgment: given the requirement, the known categories + their strategy text,
-    and the current project test context, returns `{category, sufficient, gaps}`. If insufficient,
-    the result is `{status: "needs_input", gaps}` — no test case generated; the manual retry path
-    today is `PATCH /testgen/context` to add the missing info, then call `/testgen/generate` again
-    (Stage C's `/testgen/resolve` doesn't exist yet). If sufficient, call 2
-    (`GENERATE_TEST_CASE_PROMPT`) generates `{preconditions, steps, acceptance_criteria,
-    verification_method}` — the category's strategy text itself tells the model what shape to
-    produce (e.g. Non-testable-by-test's strategy says to propose a verification method and a
-    checklist instead of test steps), so **one schema/prompt covers testable and non-testable
-    categories with no hardcoded Python branch for that case** — generalizing the mechanism instead
-    of special-casing it. Both calls degrade to `needs_input` on malformed JSON, never crash.
-    Generated test cases persist to `db.test_cases`; batch results are always a mixed
-    `generated`/`needs_input` list per requirement — one failure never blocks the rest.
+    `evaluate_model`) — two LLM calls per requirement, not three, plus a deterministic self-review
+    pass. Requirements have no stored `category` field (`Requirement` in `retrieval.py` is just
+    `id/text/source`), so classification happens on the fly every call. Both `/testgen/generate` and
+    `/testgen/resolve` share one pipeline, `_generate_for_requirement` (`backend/server.py`): call 1
+    (`CLASSIFY_AND_ASSESS_PROMPT`) combines classification and **Verdict 1** in one judgment — given
+    the requirement, the known categories + their strategy text, the current project test context,
+    and any authorized assumptions for this attempt, returns `{category, sufficient, gaps}`. If
+    insufficient, each gap is persisted to `db.test_gaps` (`gap_source: "sufficiency"`) and returned
+    with a `gap_id` — no test case generated. If sufficient, call 2 (`GENERATE_TEST_CASE_PROMPT`)
+    generates `{preconditions, steps, acceptance_criteria, verification_method}` — the category's
+    strategy text itself tells the model what shape to produce (e.g. Non-testable-by-test's strategy
+    says to propose a verification method and a checklist instead of test steps), so **one
+    schema/prompt covers testable and non-testable categories with no hardcoded Python branch for
+    that case**. **Verdict 2** then runs `backend/testgen_lint.py`'s `check_anti_genericity` — a
+    *deterministic* lint pass (no third LLM call, per A.7's "this is itself testable" framing),
+    reusing `deterministic_review.py`'s `WEAK_WORDS`/`_has_measure` — that flags banned generic
+    phrasing, acceptance criteria missing a measurable quantity (only enforced when the requirement
+    or context actually establishes one — a purely functional/logging requirement can be satisfied
+    by an observable-state criterion instead), and numeric values in the output that aren't
+    traceable (by bare numeral, not exact wording) to the requirement, a context item, or a marked
+    assumption. A Verdict-2 failure persists gaps the same way as Verdict 1 (`gap_source:
+    "self_review"`) and the draft test case is discarded, not persisted. Both LLM calls degrade to
+    `needs_input` (gaps persisted) on malformed JSON, never crash. Generated test cases persist to
+    `db.test_cases` with `assumptions` populated only via an authorized fill-in (never silently);
+    batch results are a mixed `generated`/`needs_input` list per requirement — one failure never
+    blocks the rest.
   - `GET /testgen/testcases` (optional `?requirement_id=` filter).
+  - `POST /testgen/resolve` (`{gap_id, resolution_type: "answer"|"authorize_fill", answer?}`) closes
+    the loop A.5 calls for. `"answer"` appends a new `user_provided` context item from the answer
+    text and bumps the context version (same mechanism as `PATCH /testgen/context`'s question-answer
+    handling — creates version 1 if no context exists yet), so the fact benefits every future
+    generation, not just this one. `"authorize_fill"` calls a new `AUTHORIZE_FILL_PROMPT` asking for
+    exactly one proposed `{value, rationale, confidence}` for that specific gap only; on malformed
+    output it does **not** fabricate a value — it returns `needs_input` with a fresh gap explaining
+    the auto-fill failed rather than silently inventing one. On success the proposal becomes an
+    `extra_assumptions` entry threaded through `_generate_for_requirement`, which is what actually
+    populates `TestCase.assumptions` for the first time. Both paths mark the original gap
+    `status: "resolved"` and regenerate via the shared pipeline. 404 on an unknown `gap_id`, 409 if
+    already resolved. **Known simplification**: resolving one gap doesn't auto-close sibling gaps
+    from the same requirement's earlier attempt — treat `GET /testgen/gaps?status=open` as the
+    source of truth after each resolve.
+  - `GET /testgen/gaps` (optional `?status=open|resolved` filter) — not in A.5's literal endpoint
+    list, added because gaps are persisted objects now (needed for `/testgen/resolve` to have
+    something to reference) and a host UI needs a way to discover outstanding `gap_id`s.
 
 **`backend/retrieval.py`** (renamed from `showcase.py` in Phase 1 — this is now "the" requirements
 store, not a demo-specific module) is self-contained: its own SQLite store, embeddings, and search

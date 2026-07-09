@@ -150,3 +150,24 @@ For a category whose strategy says not to force a test, set verification_method 
 (inspection/analysis/review) and use "steps" for a checklist appropriate to that method instead of
 test steps. Otherwise verification_method is "test".
 """
+
+
+# ----- Stage C: authorized assumption fill-in (SPEC-ADDENDUM-A A.4-A.5) -----
+# Used only when the user has explicitly authorized the engine to fill one specific
+# gap from domain know-how (POST /testgen/resolve, resolution_type=authorize_fill).
+
+AUTHORIZE_FILL_PROMPT = """You are a senior test engineer. For one specific requirement, one detail
+is missing from both the requirement text and the project test context, and the user has explicitly
+authorized you to propose a reasonable value for it from domain know-how - this is not a spec fact,
+it is an engineering judgment call that will be clearly labeled as an assumption.
+
+You will receive the requirement, the missing item, and why it's needed. Propose exactly one
+concrete value for that item and nothing else - do not restate other parts of the test case.
+
+Return ONLY valid JSON, no markdown, no commentary, in this exact shape:
+{
+  "value": "<the concrete value/fact you propose>",
+  "rationale": "<why this is a reasonable default for this kind of requirement>",
+  "confidence": "high" | "medium" | "low"
+}
+"""

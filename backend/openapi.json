@@ -676,6 +676,56 @@
         "title": "Requirement",
         "type": "object"
       },
+      "ResolveBody": {
+        "properties": {
+          "answer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answer"
+          },
+          "gap_id": {
+            "title": "Gap Id",
+            "type": "string"
+          },
+          "model": {
+            "default": "gemma3:1b",
+            "title": "Model",
+            "type": "string"
+          },
+          "ollama_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ollama Url"
+          },
+          "provider": {
+            "default": "ollama",
+            "title": "Provider",
+            "type": "string"
+          },
+          "resolution_type": {
+            "title": "Resolution Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "gap_id",
+          "resolution_type"
+        ],
+        "title": "ResolveBody",
+        "type": "object"
+      },
       "ReviewRequirementBody": {
         "properties": {
           "model": {
@@ -2509,6 +2559,51 @@
         "summary": "Get Test Context Questions"
       }
     },
+    "/api/testgen/gaps": {
+      "get": {
+        "deprecated": true,
+        "operationId": "list_gaps_api_testgen_gaps_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Gaps"
+      }
+    },
     "/api/testgen/generate": {
       "post": {
         "deprecated": true,
@@ -2544,6 +2639,43 @@
           }
         },
         "summary": "Generate Test Cases"
+      }
+    },
+    "/api/testgen/resolve": {
+      "post": {
+        "deprecated": true,
+        "operationId": "resolve_gap_api_testgen_resolve_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resolve Gap"
       }
     },
     "/api/testgen/testcases": {
@@ -4378,6 +4510,55 @@
         "summary": "Get Test Context Questions"
       }
     },
+    "/api/v1/testgen/gaps": {
+      "get": {
+        "operationId": "list_gaps_api_v1_testgen_gaps_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Gaps"
+      }
+    },
     "/api/v1/testgen/generate": {
       "post": {
         "operationId": "generate_test_cases_api_v1_testgen_generate_post",
@@ -4417,6 +4598,47 @@
           }
         ],
         "summary": "Generate Test Cases"
+      }
+    },
+    "/api/v1/testgen/resolve": {
+      "post": {
+        "operationId": "resolve_gap_api_v1_testgen_resolve_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Resolve Gap"
       }
     },
     "/api/v1/testgen/testcases": {

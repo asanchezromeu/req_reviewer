@@ -39,7 +39,9 @@ try:
         DEFAULT_CATEGORY_STRATEGIES,
         CLASSIFY_AND_ASSESS_PROMPT,
         GENERATE_TEST_CASE_PROMPT,
+        AUTHORIZE_FILL_PROMPT,
     )
+    from .testgen_lint import check_anti_genericity
 except ImportError:
     from incose_rules import (
         INCOSE_RULES,
@@ -57,7 +59,9 @@ except ImportError:
         DEFAULT_CATEGORY_STRATEGIES,
         CLASSIFY_AND_ASSESS_PROMPT,
         GENERATE_TEST_CASE_PROMPT,
+        AUTHORIZE_FILL_PROMPT,
     )
+    from testgen_lint import check_anti_genericity
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
@@ -120,6 +124,7 @@ class MemoryDatabase:
         self.test_context_versions = MemoryCollection()
         self.category_strategies = MemoryCollection()
         self.test_cases = MemoryCollection()
+        self.test_gaps = MemoryCollection()
 
 
 def _matches_query(document: Dict[str, Any], query: Dict[str, Any]) -> bool:
@@ -1185,8 +1190,7 @@ async def get_current_test_context() -> Optional[Dict[str, Any]]:
     return docs[0] if docs else None
 
 
-# ----- Test generation: category strategies + generation (SPEC-ADDENDUM-A, Stage B) -----
-# Verdict 2 self-review, assumption marking, and /testgen/resolve are Stage C, not built yet.
+# ----- Test generation: category strategies + generation (SPEC-ADDENDUM-A, Stages B+C) -----
 
 class CategoryStrategyBody(BaseModel):
     instructions: str
@@ -1253,6 +1257,113 @@ def _context_listing(context: Optional[Dict[str, Any]]) -> str:
     return "\n".join(f"[{item['category']}] {item['key']}: {item['value']}" for item in context["items"])
 
 
+async def _persist_gaps(requirement_id: str, gaps: List[Dict[str, Any]], gap_source: str) -> List[Dict[str, Any]]:
+    persisted = []
+    for gap in gaps:
+        doc = {
+            "id": str(uuid.uuid4()),
+            "requirement_id": requirement_id,
+            "item": str(gap.get("item", "")),
+            "why": str(gap.get("why", "")),
+            "gap_source": gap_source,
+            "status": "open",
+            "resolution_options": ["answer", "authorize_fill"],
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        await db.test_gaps.insert_one(doc)
+        persisted.append(
+            {
+                "gap_id": doc["id"],
+                "item": doc["item"],
+                "why": doc["why"],
+                "gap_source": doc["gap_source"],
+                "resolution_options": doc["resolution_options"],
+            }
+        )
+    return persisted
+
+
+async def _generate_for_requirement(
+    requirement: Dict[str, Any],
+    strategies: Dict[str, str],
+    context: Optional[Dict[str, Any]],
+    provider: str,
+    model: str,
+    ollama_url: Optional[str],
+    extra_assumptions: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    req_id = requirement["id"]
+    req_text = requirement["text"]
+    extra_assumptions = extra_assumptions or []
+    context_listing = _context_listing(context)
+    context_version = context["version"] if context else None
+    category_listing = "\n".join(f"- {name}: {instructions}" for name, instructions in strategies.items())
+    assumption_listing = "\n".join(
+        f"- {a['text']}: {a['value']} ({a['rationale']})" for a in extra_assumptions
+    )
+
+    assess_user_message = (
+        f"Requirement: [{req_id}] {req_text}\n\n"
+        f"Known categories:\n{category_listing}\n\n"
+        f"Project test context:\n{context_listing}"
+    )
+    if assumption_listing:
+        assess_user_message += f"\n\nAuthorized assumptions for this requirement:\n{assumption_listing}"
+
+    try:
+        raw = await llm_complete(provider, model, CLASSIFY_AND_ASSESS_PROMPT, assess_user_message, ollama_url)
+        assessment = extract_json(raw)
+        category = str(assessment.get("category", "")).strip() or "Functional"
+        sufficient = bool(assessment.get("sufficient"))
+        gaps = assessment.get("gaps", []) or []
+    except Exception as exc:
+        logger.exception("testgen classify/assess failed")
+        gap_dicts = await _persist_gaps(req_id, [{"item": "analysis failed", "why": str(exc)}], "sufficiency")
+        return {"requirement_id": req_id, "status": "needs_input", "category": None, "gaps": gap_dicts}
+
+    if not sufficient:
+        gap_dicts = await _persist_gaps(req_id, gaps, "sufficiency")
+        return {"requirement_id": req_id, "status": "needs_input", "category": category, "gaps": gap_dicts}
+
+    strategy_instructions = strategies.get(category, "Use sound test-engineering judgement for this category.")
+    generate_user_message = (
+        f"Requirement: [{req_id}] {req_text}\n\n"
+        f"Category: {category}\n"
+        f"Category strategy: {strategy_instructions}\n\n"
+        f"Project test context:\n{context_listing}"
+    )
+    if assumption_listing:
+        generate_user_message += f"\n\nAuthorized assumptions for this requirement:\n{assumption_listing}"
+
+    try:
+        raw = await llm_complete(provider, model, GENERATE_TEST_CASE_PROMPT, generate_user_message, ollama_url)
+        generated = extract_json(raw)
+    except Exception as exc:
+        logger.exception("testgen generation failed")
+        gap_dicts = await _persist_gaps(req_id, [{"item": "generation failed", "why": str(exc)}], "sufficiency")
+        return {"requirement_id": req_id, "status": "needs_input", "category": category, "gaps": gap_dicts}
+
+    context_items = context["items"] if context else []
+    violations = check_anti_genericity(generated, req_text, context_items, extra_assumptions)
+    if violations:
+        gap_dicts = await _persist_gaps(req_id, violations, "self_review")
+        return {"requirement_id": req_id, "status": "needs_input", "category": category, "gaps": gap_dicts}
+
+    test_case = TestCase(
+        requirement_ids=[req_id],
+        category=category,
+        preconditions=[str(x) for x in generated.get("preconditions", []) or []],
+        steps=[str(x) for x in generated.get("steps", []) or []],
+        acceptance_criteria=[str(x) for x in generated.get("acceptance_criteria", []) or []],
+        verification_method=str(generated.get("verification_method", "test")),
+        review_flags=["safety"] if category == "Safety-related" else [],
+        assumptions=extra_assumptions,
+        context_version=context_version,
+    )
+    await db.test_cases.insert_one(test_case.model_dump())
+    return {"requirement_id": req_id, "status": "generated", "category": category, "test_case": test_case}
+
+
 @api.post("/testgen/generate")
 async def generate_test_cases(body: GenerateBody):
     all_requirements = await asyncio.to_thread(requirements_store.list_requirements)
@@ -1266,74 +1377,13 @@ async def generate_test_cases(body: GenerateBody):
 
     strategies = await get_category_strategies()
     context = await get_current_test_context()
-    context_listing = _context_listing(context)
-    context_version = context["version"] if context else None
-    category_listing = "\n".join(f"- {name}: {instructions}" for name, instructions in strategies.items())
-
     sem = asyncio.Semaphore(8)
 
     async def process(requirement: Dict[str, Any]) -> Dict[str, Any]:
         async with sem:
-            req_id = requirement["id"]
-            req_text = requirement["text"]
-            assess_user_message = (
-                f"Requirement: [{req_id}] {req_text}\n\n"
-                f"Known categories:\n{category_listing}\n\n"
-                f"Project test context:\n{context_listing}"
+            return await _generate_for_requirement(
+                requirement, strategies, context, body.provider, body.model, body.ollama_url
             )
-            try:
-                raw = await llm_complete(
-                    body.provider, body.model, CLASSIFY_AND_ASSESS_PROMPT, assess_user_message, body.ollama_url
-                )
-                assessment = extract_json(raw)
-                category = str(assessment.get("category", "")).strip() or "Functional"
-                sufficient = bool(assessment.get("sufficient"))
-                gaps = assessment.get("gaps", []) or []
-            except Exception as exc:
-                logger.exception("testgen classify/assess failed")
-                return {
-                    "requirement_id": req_id,
-                    "status": "needs_input",
-                    "category": None,
-                    "gaps": [{"item": "analysis failed", "why": str(exc)}],
-                }
-
-            if not sufficient:
-                return {"requirement_id": req_id, "status": "needs_input", "category": category, "gaps": gaps}
-
-            strategy_instructions = strategies.get(category, "Use sound test-engineering judgement for this category.")
-            generate_user_message = (
-                f"Requirement: [{req_id}] {req_text}\n\n"
-                f"Category: {category}\n"
-                f"Category strategy: {strategy_instructions}\n\n"
-                f"Project test context:\n{context_listing}"
-            )
-            try:
-                raw = await llm_complete(
-                    body.provider, body.model, GENERATE_TEST_CASE_PROMPT, generate_user_message, body.ollama_url
-                )
-                generated = extract_json(raw)
-            except Exception as exc:
-                logger.exception("testgen generation failed")
-                return {
-                    "requirement_id": req_id,
-                    "status": "needs_input",
-                    "category": category,
-                    "gaps": [{"item": "generation failed", "why": str(exc)}],
-                }
-
-            test_case = TestCase(
-                requirement_ids=[req_id],
-                category=category,
-                preconditions=[str(x) for x in generated.get("preconditions", []) or []],
-                steps=[str(x) for x in generated.get("steps", []) or []],
-                acceptance_criteria=[str(x) for x in generated.get("acceptance_criteria", []) or []],
-                verification_method=str(generated.get("verification_method", "test")),
-                review_flags=["safety"] if category == "Safety-related" else [],
-                context_version=context_version,
-            )
-            await db.test_cases.insert_one(test_case.model_dump())
-            return {"requirement_id": req_id, "status": "generated", "category": category, "test_case": test_case}
 
     results = await asyncio.gather(*(process(r) for r in requirements))
     return {"results": results}
@@ -1345,6 +1395,100 @@ async def list_test_cases(requirement_id: Optional[str] = None):
     docs = await cursor.to_list(1000)
     if requirement_id:
         docs = [doc for doc in docs if requirement_id in doc.get("requirement_ids", [])]
+    return docs
+
+
+# ----- Test generation: resolve/regenerate loop (SPEC-ADDENDUM-A, Stage C) -----
+
+class ResolveBody(BaseModel):
+    gap_id: str
+    resolution_type: str  # "answer" | "authorize_fill"
+    answer: Optional[str] = None
+    provider: str = "ollama"
+    model: str = "gemma3:1b"
+    ollama_url: Optional[str] = None
+
+
+@api.post("/testgen/resolve")
+async def resolve_gap(body: ResolveBody):
+    gap = await db.test_gaps.find_one({"id": body.gap_id})
+    if not gap:
+        raise HTTPException(status_code=404, detail=f"Unknown gap id: {body.gap_id}")
+    if gap["status"] != "open":
+        raise HTTPException(status_code=409, detail="This gap has already been resolved")
+
+    all_requirements = await asyncio.to_thread(requirements_store.list_requirements)
+    requirement = next((r for r in all_requirements if r["id"] == gap["requirement_id"]), None)
+    if not requirement:
+        raise HTTPException(status_code=404, detail=f"Requirement no longer exists: {gap['requirement_id']}")
+
+    strategies = await get_category_strategies()
+    extra_assumptions: List[Dict[str, Any]] = []
+
+    if body.resolution_type == "answer":
+        if not body.answer:
+            raise HTTPException(status_code=400, detail="'answer' is required for resolution_type=answer")
+        current = await get_current_test_context()
+        items = [dict(item) for item in current["items"]] if current else []
+        items.append(
+            TestContextItem(
+                category="elicited",
+                key=gap["item"],
+                value=body.answer,
+                status="user_provided",
+            ).model_dump()
+        )
+        next_version = (current["version"] + 1) if current else 1
+        questions = current["questions"] if current else []
+        new_context = TestContext(version=next_version, items=items, questions=questions)
+        await db.test_context_versions.insert_one(new_context.model_dump())
+        context = new_context.model_dump()
+    elif body.resolution_type == "authorize_fill":
+        fill_user_message = (
+            f"Requirement: [{requirement['id']}] {requirement['text']}\n\n"
+            f"Missing item: {gap['item']}\n"
+            f"Why it's needed: {gap['why']}"
+        )
+        try:
+            raw = await llm_complete(body.provider, body.model, AUTHORIZE_FILL_PROMPT, fill_user_message, body.ollama_url)
+            proposal = extract_json(raw)
+            value = str(proposal.get("value", "")).strip()
+            if not value:
+                raise ValueError("empty proposed value")
+            extra_assumptions = [
+                {
+                    "text": gap["item"],
+                    "value": value,
+                    "rationale": str(proposal.get("rationale", "")),
+                    "confidence": str(proposal.get("confidence", "low")),
+                }
+            ]
+        except Exception as exc:
+            logger.exception("testgen authorize_fill proposal failed")
+            gap_dicts = await _persist_gaps(
+                requirement["id"],
+                [{"item": gap["item"], "why": f"Automatic fill-in failed: {exc}"}],
+                "sufficiency",
+            )
+            await db.test_gaps.update_one({"id": body.gap_id}, {"$set": {"status": "resolved"}})
+            return {"requirement_id": requirement["id"], "status": "needs_input", "category": None, "gaps": gap_dicts}
+        context = await get_current_test_context()
+    else:
+        raise HTTPException(status_code=400, detail="resolution_type must be 'answer' or 'authorize_fill'")
+
+    await db.test_gaps.update_one({"id": body.gap_id}, {"$set": {"status": "resolved"}})
+
+    return await _generate_for_requirement(
+        requirement, strategies, context, body.provider, body.model, body.ollama_url, extra_assumptions=extra_assumptions
+    )
+
+
+@api.get("/testgen/gaps")
+async def list_gaps(status: Optional[str] = None):
+    cursor = db.test_gaps.find({}, {"_id": 0}).sort("created_at", -1)
+    docs = await cursor.to_list(1000)
+    if status:
+        docs = [doc for doc in docs if doc.get("status") == status]
     return docs
 
 
