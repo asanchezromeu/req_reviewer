@@ -39,7 +39,8 @@ python -m unittest backend.tests.test_retrieval backend.tests.test_conflict_prec
   backend.tests.test_summary_contract backend.tests.test_corpus_fewshot \
   backend.tests.test_reference_kb backend.tests.test_reference_ingestion \
   backend.tests.test_model_registry backend.tests.test_dataset_export \
-  backend.tests.test_model_registry_routes backend.tests.test_model_evaluate -v
+  backend.tests.test_model_registry_routes backend.tests.test_model_evaluate \
+  backend.tests.test_testgen_context -v
   # ^ all stdlib+fastapi TestClient only, no live server or Ollama needed (LLM calls are mocked).
   # Note: test_search_verification.py / test_reference_ingestion.py have a known intermittent
   # Windows-only PermissionError on tempdir cleanup (a background IndexCoordinator thread racing
@@ -154,6 +155,31 @@ python -m unittest tests.test_req_analysis -v
     `degraded_count` — how often each model's result fell back to the deterministic scorer via
     `analyze_one`'s existing `fallback` marker, so a misleadingly-similar comparison caused by both
     models hitting that fallback is visible rather than hidden.
+- **Test-case generation, Stage A only (Phase 6, `SPEC-ADDENDUM-A.md`)** — the "project test
+  context" (addendum A.2): whole-set analysis + elicitation, versioned. Only this stage is built;
+  category-aware generation, the two-verdict sufficiency gate, assumption marking, and the
+  resolve/regenerate loop (addendum A.3–A.5) are **not implemented yet**.
+  - `POST /testgen/context/analyze` sends every stored requirement plus any ingested reference
+    chunks to the LLM (`backend/testgen_prompts.py`'s `CONTEXT_ANALYSIS_PROMPT`) and gets back
+    `items` (operating modes, parameters+tolerances, interfaces, environmental conditions,
+    terminology, categories present — each tagged with `source_requirement_ids`) and `questions`
+    (things it couldn't infer, each with a `reason`). On malformed LLM output it degrades to an
+    empty-items context with one system question flagging the failure — never crashes, never
+    fabricates items.
+  - Storage is a new `db.model_registry`-style collection, `db.test_context_versions`: every
+    analyze/patch call **inserts a new version** rather than mutating in place (`get_current_test_context`
+    reads the highest `version`), so old versions are retained — needed later so a generated test
+    case can record which context version it was built against.
+  - `GET /testgen/context` (404 until the first analyze), `PATCH /testgen/context` (apply
+    `item_updates`/`new_items`/`question_answers`, bump the version — answering a question also
+    appends a derived context item, so it's available to future generation), `GET
+    /testgen/context/questions` (optional `?status=open|answered` filter).
+  - **Three open decisions from the addendum were defaulted, not confirmed** (the user was
+    unavailable when asked): 1 requirement → N test cases (not M:N) for the future test-case
+    schema; use the addendum's own 7-category taxonomy; safety-related requirements get
+    auto-generated with a mandatory-review flag rather than being excluded. None of these affect
+    Stage A's shape directly, but they'll shape Stage B (category-aware generation) — confirm
+    before building that stage.
 
 **`backend/retrieval.py`** (renamed from `showcase.py` in Phase 1 — this is now "the" requirements
 store, not a demo-specific module) is self-contained: its own SQLite store, embeddings, and search

@@ -232,6 +232,130 @@
         "title": "ClassifyBody",
         "type": "object"
       },
+      "ContextAnalyzeBody": {
+        "properties": {
+          "model": {
+            "default": "gemma3:1b",
+            "title": "Model",
+            "type": "string"
+          },
+          "ollama_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ollama Url"
+          },
+          "provider": {
+            "default": "ollama",
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "title": "ContextAnalyzeBody",
+        "type": "object"
+      },
+      "ContextItemUpdate": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "value"
+        ],
+        "title": "ContextItemUpdate",
+        "type": "object"
+      },
+      "ContextNewItem": {
+        "properties": {
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "source_requirement_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Requirement Ids",
+            "type": "array"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "category",
+          "key",
+          "value"
+        ],
+        "title": "ContextNewItem",
+        "type": "object"
+      },
+      "ContextPatchBody": {
+        "properties": {
+          "item_updates": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ContextItemUpdate"
+            },
+            "title": "Item Updates",
+            "type": "array"
+          },
+          "new_items": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ContextNewItem"
+            },
+            "title": "New Items",
+            "type": "array"
+          },
+          "question_answers": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ContextQuestionAnswer"
+            },
+            "title": "Question Answers",
+            "type": "array"
+          }
+        },
+        "title": "ContextPatchBody",
+        "type": "object"
+      },
+      "ContextQuestionAnswer": {
+        "properties": {
+          "answer": {
+            "title": "Answer",
+            "type": "string"
+          },
+          "question_id": {
+            "title": "Question Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "question_id",
+          "answer"
+        ],
+        "title": "ContextQuestionAnswer",
+        "type": "object"
+      },
       "DistillationStartBody": {
         "properties": {
           "base_model": {
@@ -2096,6 +2220,140 @@
         ]
       }
     },
+    "/api/testgen/context": {
+      "get": {
+        "deprecated": true,
+        "operationId": "get_test_context_api_testgen_context_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Test Context"
+      },
+      "patch": {
+        "deprecated": true,
+        "operationId": "patch_test_context_api_testgen_context_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContextPatchBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Patch Test Context"
+      }
+    },
+    "/api/testgen/context/analyze": {
+      "post": {
+        "deprecated": true,
+        "operationId": "analyze_test_context_api_testgen_context_analyze_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContextAnalyzeBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Analyze Test Context"
+      }
+    },
+    "/api/testgen/context/questions": {
+      "get": {
+        "deprecated": true,
+        "operationId": "get_test_context_questions_api_testgen_context_questions_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Test Context Questions"
+      }
+    },
     "/api/training/datasets": {
       "get": {
         "deprecated": true,
@@ -3618,6 +3876,156 @@
         "tags": [
           "requirements"
         ]
+      }
+    },
+    "/api/v1/testgen/context": {
+      "get": {
+        "operationId": "get_test_context_api_v1_testgen_context_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Test Context"
+      },
+      "patch": {
+        "operationId": "patch_test_context_api_v1_testgen_context_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContextPatchBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Patch Test Context"
+      }
+    },
+    "/api/v1/testgen/context/analyze": {
+      "post": {
+        "operationId": "analyze_test_context_api_v1_testgen_context_analyze_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContextAnalyzeBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Analyze Test Context"
+      }
+    },
+    "/api/v1/testgen/context/questions": {
+      "get": {
+        "operationId": "get_test_context_questions_api_v1_testgen_context_questions_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Test Context Questions"
       }
     },
     "/api/v1/training/datasets": {

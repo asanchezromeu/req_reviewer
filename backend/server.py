@@ -34,6 +34,7 @@ try:
     from .llm_contract import extract_json
     from . import deterministic_review
     from . import model_registry
+    from .testgen_prompts import CONTEXT_ANALYSIS_PROMPT
 except ImportError:
     from incose_rules import (
         INCOSE_RULES,
@@ -46,6 +47,7 @@ except ImportError:
     from llm_contract import extract_json
     import deterministic_review
     import model_registry
+    from testgen_prompts import CONTEXT_ANALYSIS_PROMPT
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
@@ -105,6 +107,7 @@ class MemoryDatabase:
         self.training_datasets = MemoryCollection()
         self.distillation_jobs = MemoryCollection()
         self.model_registry = MemoryCollection()
+        self.test_context_versions = MemoryCollection()
 
 
 def _matches_query(document: Dict[str, Any], query: Dict[str, Any]) -> bool:
@@ -1105,6 +1108,71 @@ class EvaluateBody(BaseModel):
     ollama_url: Optional[str] = None
 
 
+# ----- Test generation: project test context (SPEC-ADDENDUM-A, Stage A) -----
+# Context analysis + elicitation only. Category-aware generation, the two-verdict
+# sufficiency gate, and the resolve/regenerate loop (addendum A.3-A.5) are later
+# stages, not implemented yet.
+
+class TestContextItem(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    category: str
+    key: str
+    value: str
+    source_requirement_ids: List[str] = []
+    status: str = "inferred"  # inferred | confirmed | user_provided
+
+
+class TestContextQuestion(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    question: str
+    reason: str
+    status: str = "open"  # open | answered
+    answer: Optional[str] = None
+
+
+class TestContext(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    version: int
+    items: List[TestContextItem] = []
+    questions: List[TestContextQuestion] = []
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+
+class ContextAnalyzeBody(BaseModel):
+    provider: str = "ollama"
+    model: str = "gemma3:1b"
+    ollama_url: Optional[str] = None
+
+
+class ContextItemUpdate(BaseModel):
+    id: str
+    value: str
+
+
+class ContextNewItem(BaseModel):
+    category: str
+    key: str
+    value: str
+    source_requirement_ids: List[str] = []
+
+
+class ContextQuestionAnswer(BaseModel):
+    question_id: str
+    answer: str
+
+
+class ContextPatchBody(BaseModel):
+    item_updates: List[ContextItemUpdate] = []
+    new_items: List[ContextNewItem] = []
+    question_answers: List[ContextQuestionAnswer] = []
+
+
+async def get_current_test_context() -> Optional[Dict[str, Any]]:
+    cursor = db.test_context_versions.find({}, {"_id": 0}).sort("version", -1)
+    docs = await cursor.to_list(1)
+    return docs[0] if docs else None
+
+
 @api.post("/datasets/export")
 async def export_dataset(label: Optional[str] = None):
     query = {"label": label} if label else {}
@@ -1240,6 +1308,130 @@ async def evaluate_model(body: EvaluateBody):
         },
         "detail": detail,
     }
+
+
+@api.post("/testgen/context/analyze")
+async def analyze_test_context(body: ContextAnalyzeBody):
+    requirements = await asyncio.to_thread(requirements_store.list_requirements)
+    if not requirements:
+        raise HTTPException(status_code=400, detail="No requirements are stored yet")
+    reference_chunks = await asyncio.to_thread(requirements_store.list_reference_chunks)
+
+    listing = "\n".join(f"- [{r['id']}] {r['text']}" for r in requirements)
+    if reference_chunks:
+        listing += "\n\nReference material:\n" + "\n".join(
+            f"- [{c['document']}] {c['text']}" for c in reference_chunks
+        )
+
+    items: List[Dict[str, Any]] = []
+    questions: List[Dict[str, Any]] = []
+    try:
+        raw = await llm_complete(body.provider, body.model, CONTEXT_ANALYSIS_PROMPT, listing, body.ollama_url)
+        parsed = extract_json(raw)
+        for item in parsed.get("items", []) or []:
+            items.append(
+                TestContextItem(
+                    category=str(item.get("category", "")),
+                    key=str(item.get("key", "")),
+                    value=str(item.get("value", "")),
+                    source_requirement_ids=[str(i) for i in item.get("source_requirement_ids", []) or []],
+                ).model_dump()
+            )
+        for question in parsed.get("questions", []) or []:
+            questions.append(
+                TestContextQuestion(
+                    question=str(question.get("question", "")),
+                    reason=str(question.get("reason", "")),
+                ).model_dump()
+            )
+    except Exception as exc:
+        logger.exception("test context analysis failed")
+        questions.append(
+            TestContextQuestion(
+                question="Context analysis failed - please retry.",
+                reason=f"The analysis LLM call did not return usable output: {exc}",
+            ).model_dump()
+        )
+
+    previous = await get_current_test_context()
+    next_version = (previous["version"] + 1) if previous else 1
+    context = TestContext(version=next_version, items=items, questions=questions)
+    await db.test_context_versions.insert_one(context.model_dump())
+    return context
+
+
+@api.get("/testgen/context")
+async def get_test_context():
+    context = await get_current_test_context()
+    if not context:
+        raise HTTPException(
+            status_code=404,
+            detail="No project test context yet - run POST /testgen/context/analyze first",
+        )
+    return context
+
+
+@api.patch("/testgen/context")
+async def patch_test_context(body: ContextPatchBody):
+    current = await get_current_test_context()
+    if not current:
+        raise HTTPException(
+            status_code=404,
+            detail="No project test context yet - run POST /testgen/context/analyze first",
+        )
+
+    items = [dict(item) for item in current["items"]]
+    by_id = {item["id"]: item for item in items}
+    for update in body.item_updates:
+        target = by_id.get(update.id)
+        if not target:
+            raise HTTPException(status_code=404, detail=f"Unknown context item id: {update.id}")
+        target["value"] = update.value
+        if target["status"] == "inferred":
+            target["status"] = "confirmed"
+
+    for new_item in body.new_items:
+        items.append(
+            TestContextItem(
+                category=new_item.category,
+                key=new_item.key,
+                value=new_item.value,
+                source_requirement_ids=new_item.source_requirement_ids,
+                status="user_provided",
+            ).model_dump()
+        )
+
+    questions = [dict(question) for question in current["questions"]]
+    by_qid = {question["id"]: question for question in questions}
+    for answer in body.question_answers:
+        target = by_qid.get(answer.question_id)
+        if not target:
+            raise HTTPException(status_code=404, detail=f"Unknown question id: {answer.question_id}")
+        target["status"] = "answered"
+        target["answer"] = answer.answer
+        items.append(
+            TestContextItem(
+                category="elicited",
+                key=target["question"],
+                value=answer.answer,
+                status="user_provided",
+            ).model_dump()
+        )
+
+    context = TestContext(version=current["version"] + 1, items=items, questions=questions)
+    await db.test_context_versions.insert_one(context.model_dump())
+    return context
+
+
+@api.get("/testgen/context/questions")
+async def get_test_context_questions(status: Optional[str] = None):
+    context = await get_current_test_context()
+    if not context:
+        return []
+    questions = context["questions"]
+    if status:
+        questions = [q for q in questions if q.get("status") == status]
+    return questions
 
 
 # ---------- Mount ----------
