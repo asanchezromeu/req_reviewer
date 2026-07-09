@@ -394,6 +394,50 @@ class TestgenResolveTests(unittest.TestCase):
         self.assertEqual(len(run(server.list_gaps(status="open"))), 1)  # fresh gap from the regeneration attempt
         self.assertEqual(len(run(server.list_gaps(status="resolved"))), 1)
 
+    # ---------- DELETE /testgen/gaps/{gap_id} (dismiss) ----------
+
+    def test_dismiss_gap_removes_it_from_open_without_regenerating(self):
+        self._seed_requirement("REQ-002", "The system shall be fast.")
+
+        async def fake_insufficient(provider, model, sys_msg, user, ollama_url=None):
+            return json.dumps({"category": "Performance / timing", "sufficient": False, "gaps": [{"item": "x", "why": "y"}]})
+
+        with patch.object(server, "llm_complete", fake_insufficient):
+            response = run(server.generate_test_cases(server.GenerateBody()))
+        gap_id = response["results"][0]["gaps"][0]["gap_id"]
+
+        async def fail_if_called(*args, **kwargs):
+            raise AssertionError("dismiss must not call the LLM")
+
+        with patch.object(server, "llm_complete", fail_if_called):
+            result = run(server.dismiss_gap(gap_id))
+
+        self.assertEqual(result, {"dismissed": True})
+        self.assertEqual(run(server.list_gaps(status="open")), [])
+        dismissed = run(server.list_gaps(status="dismissed"))
+        self.assertEqual(len(dismissed), 1)
+        self.assertEqual(dismissed[0]["id"], gap_id)
+
+    def test_dismiss_unknown_gap_404s(self):
+        with self.assertRaises(HTTPException) as ctx:
+            run(server.dismiss_gap("nope"))
+        self.assertEqual(ctx.exception.status_code, 404)
+
+    def test_dismiss_already_resolved_gap_409s(self):
+        self._seed_requirement("REQ-002", "The system shall be fast.")
+
+        async def fake_insufficient(provider, model, sys_msg, user, ollama_url=None):
+            return json.dumps({"category": "Performance / timing", "sufficient": False, "gaps": [{"item": "x", "why": "y"}]})
+
+        with patch.object(server, "llm_complete", fake_insufficient):
+            response = run(server.generate_test_cases(server.GenerateBody()))
+        gap_id = response["results"][0]["gaps"][0]["gap_id"]
+        run(server.dismiss_gap(gap_id))
+
+        with self.assertRaises(HTTPException) as ctx:
+            run(server.dismiss_gap(gap_id))
+        self.assertEqual(ctx.exception.status_code, 409)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -226,9 +226,14 @@ python -m unittest tests.test_req_analysis -v
     already resolved. **Known simplification**: resolving one gap doesn't auto-close sibling gaps
     from the same requirement's earlier attempt — treat `GET /testgen/gaps?status=open` as the
     source of truth after each resolve.
-  - `GET /testgen/gaps` (optional `?status=open|resolved` filter) — not in A.5's literal endpoint
-    list, added because gaps are persisted objects now (needed for `/testgen/resolve` to have
-    something to reference) and a host UI needs a way to discover outstanding `gap_id`s.
+  - `GET /testgen/gaps` (optional `?status=open|resolved|dismissed` filter) — not in A.5's literal
+    endpoint list, added because gaps are persisted objects now (needed for `/testgen/resolve` to
+    have something to reference) and a host UI needs a way to discover outstanding `gap_id`s.
+  - `DELETE /testgen/gaps/{gap_id}` — dismisses a gap without regenerating (no LLM call), for the
+    known-simplification case above: an old gap left open by a since-superseded attempt, or one the
+    user has decided isn't worth chasing further. Sets `status: "dismissed"`, a distinct value from
+    `"resolved"` (which means an actual answer/authorize_fill regenerated through it) so the gap's
+    history stays honest rather than looking like it was fixed. 404 unknown, 409 if not `open`.
 
 **`backend/retrieval.py`** (renamed from `showcase.py` in Phase 1 — this is now "the" requirements
 store, not a demo-specific module) is self-contained: its own SQLite store, embeddings, and search

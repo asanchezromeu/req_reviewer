@@ -210,6 +210,7 @@ function gapCardHtml(gap) {
         <input type="text" class="answer-input" placeholder="Provide the missing fact...">
         <button class="answer-btn" data-gap="${esc(gap.gap_id)}">Answer</button>
         <button class="fill-btn secondary" data-gap="${esc(gap.gap_id)}">Authorize fill</button>
+        <button class="dismiss-btn danger" data-gap="${esc(gap.gap_id)}">Dismiss</button>
       </div>
       <div class="resolve-result"></div>
     </div>`;
@@ -228,6 +229,12 @@ function wireGapForms(root) {
     btn.addEventListener('click', async () => {
       const card = btn.closest('.gap-card');
       await resolveGap(btn.dataset.gap, 'authorize_fill', null, card.querySelector('.resolve-result'));
+    });
+  });
+  root.querySelectorAll('.dismiss-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const card = btn.closest('.gap-card');
+      await dismissGap(btn.dataset.gap, card);
     });
   });
 }
@@ -250,6 +257,15 @@ async function resolveGap(gapId, resolutionType, answer, resultEl) {
   }
 }
 
+async function dismissGap(gapId, cardEl) {
+  try {
+    await api('/testgen/gaps/' + encodeURIComponent(gapId), { method: 'DELETE' });
+    cardEl.remove();
+  } catch (err) {
+    cardEl.querySelector('.resolve-result').innerHTML = `<span class="badge error">error</span> ${esc(err.message)}`;
+  }
+}
+
 async function loadGaps() {
   const gaps = await api('/testgen/gaps?status=open');
   const list = document.getElementById('gapsList');
@@ -264,6 +280,7 @@ async function loadGaps() {
         <input type="text" class="answer-input" placeholder="Provide the missing fact...">
         <button class="answer-btn" data-gap="${esc(g.id)}">Answer</button>
         <button class="fill-btn secondary" data-gap="${esc(g.id)}">Authorize fill</button>
+        <button class="dismiss-btn danger" data-gap="${esc(g.id)}">Dismiss</button>
       </div>
       <div class="resolve-result"></div>
     </div>`).join('');

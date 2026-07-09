@@ -1493,6 +1493,21 @@ async def list_gaps(status: Optional[str] = None):
     return docs
 
 
+@api.delete("/testgen/gaps/{gap_id}")
+async def dismiss_gap(gap_id: str):
+    # Distinct from "resolved" (which /testgen/resolve sets after a real answer or
+    # authorize_fill regenerates through the gap) - a dismissed gap was never actually
+    # addressed, just acknowledged as not worth chasing further. Kept as its own status
+    # rather than deleted so the gap's history stays honest.
+    gap = await db.test_gaps.find_one({"id": gap_id})
+    if not gap:
+        raise HTTPException(status_code=404, detail=f"Unknown gap id: {gap_id}")
+    if gap["status"] != "open":
+        raise HTTPException(status_code=409, detail="This gap is not open")
+    await db.test_gaps.update_one({"id": gap_id}, {"$set": {"status": "dismissed"}})
+    return {"dismissed": True}
+
+
 @api.post("/datasets/export")
 async def export_dataset(label: Optional[str] = None):
     query = {"label": label} if label else {}

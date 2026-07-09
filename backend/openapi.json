@@ -2612,6 +2612,44 @@
         "summary": "List Gaps"
       }
     },
+    "/api/testgen/gaps/{gap_id}": {
+      "delete": {
+        "deprecated": true,
+        "operationId": "dismiss_gap_api_testgen_gaps__gap_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "gap_id",
+            "required": true,
+            "schema": {
+              "title": "Gap Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Dismiss Gap"
+      }
+    },
     "/api/testgen/generate": {
       "post": {
         "deprecated": true,
@@ -4565,6 +4603,48 @@
           }
         ],
         "summary": "List Gaps"
+      }
+    },
+    "/api/v1/testgen/gaps/{gap_id}": {
+      "delete": {
+        "operationId": "dismiss_gap_api_v1_testgen_gaps__gap_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "gap_id",
+            "required": true,
+            "schema": {
+              "title": "Gap Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Dismiss Gap"
       }
     },
     "/api/v1/testgen/generate": {
