@@ -12,11 +12,13 @@ try:
         build_summary_context,
         compact_text,
         cosine_distance,
+        extract_parameters,
         fallback_summary,
         extract_quantities,
         parse_import,
         ranked_matches,
         select_summary_sources,
+        structural_score,
     )
 except ImportError:
     from retrieval import (
@@ -27,11 +29,13 @@ except ImportError:
         build_summary_context,
         compact_text,
         cosine_distance,
+        extract_parameters,
         fallback_summary,
         extract_quantities,
         parse_import,
         ranked_matches,
         select_summary_sources,
+        structural_score,
     )
 
 
@@ -261,6 +265,31 @@ class RequirementStoreTests(unittest.TestCase):
         self.assertNotIn("PBDU-MGMT-001", ids)
         self.assertIn("main product capabilities", answer)
         self.assertIn("short-circuit", answer)
+
+
+class ParameterExtractionTests(unittest.TestCase):
+    # Regression coverage for a real demo finding: a requirement that only states a value
+    # via its unit ("12 V") was scoring structure=0.0 against a "nominal voltage" query,
+    # while requirements merely mentioning the word "voltage" in passing scored 1.0 -
+    # penalizing the requirement that actually answers the query.
+
+    def test_unit_only_requirement_matches_parameter_noun_query(self):
+        query = "nominal voltage"
+        requirement_text = "The PBDU shall operate from a nominal 12 V vehicle electrical supply."
+        self.assertEqual(structural_score(query, requirement_text), 1.0)
+
+    def test_extract_parameters_derives_parameter_from_unit(self):
+        self.assertIn("voltage", extract_parameters("The PBDU shall operate from a nominal 12 V supply."))
+        self.assertIn("current", extract_parameters("The channel shall be limited to 2 A."))
+        self.assertIn("temperature", extract_parameters("The PBDU shall operate up to 85 C."))
+
+    def test_extract_parameters_still_finds_named_parameter_without_unit(self):
+        self.assertIn("voltage", extract_parameters("The PBDU shall measure the supply input voltage."))
+
+    def test_requirement_with_only_unmapped_unit_is_not_penalized_to_zero_for_unrelated_query(self):
+        # A requirement stating a duration ("200 ms") shouldn't spuriously match a
+        # voltage query just because both fall through the same code path.
+        self.assertEqual(structural_score("nominal voltage", "The system shall respond within 200 ms."), 0.0)
 
 
 if __name__ == "__main__":

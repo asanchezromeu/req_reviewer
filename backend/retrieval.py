@@ -503,6 +503,29 @@ UNIT_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+# A requirement can express a parameter purely via its unit (e.g. "12 V") without ever
+# using the parameter noun itself (e.g. "voltage") - without this mapping, structural_score
+# would penalize the requirement that actually states the value in favor of requirements
+# that merely mention the parameter noun in passing.
+UNIT_TO_PARAMETER = {
+    "v": "voltage",
+    "mv": "voltage",
+    "kv": "voltage",
+    "a": "current",
+    "ma": "current",
+    "w": "power",
+    "kw": "power",
+    "ohm": "resistance",
+    "hz": "frequency",
+    "khz": "frequency",
+    "mhz": "frequency",
+    "c": "temperature",
+    "k": "temperature",
+    "n": "force",
+    "pa": "pressure",
+    "bar": "pressure",
+}
+
 TOKEN_PATTERN = re.compile(r"[a-zA-Z][a-zA-Z0-9_-]*|\d+(?:\.\d+)?")
 
 
@@ -543,7 +566,9 @@ def extract_quantities(text: str) -> List[Dict[str, Any]]:
 
 
 def extract_parameters(text: str) -> set:
-    return {token for token in extract_keywords(text) if token in PARAMETER_NOUNS}
+    named = {token for token in extract_keywords(text) if token in PARAMETER_NOUNS}
+    from_units = {UNIT_TO_PARAMETER[unit] for unit in extract_units(text) if unit in UNIT_TO_PARAMETER}
+    return named | from_units
 
 
 def is_broad_summary_query(query: str) -> bool:
