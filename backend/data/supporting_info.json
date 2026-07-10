@@ -1,0 +1,11 @@
+{
+  "facts": [
+    {
+      "id": "672971ec-61df-421a-8fd2-78bce6ef1e22",
+      "text": "All electrical faults are simulated either with electronic loads or with fault injection.",
+      "source": "seed",
+      "requirement_id": null,
+      "added_at": "2026-07-10T13:58:10.667428+00:00"
+    }
+  ]
+}

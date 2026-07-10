@@ -144,9 +144,14 @@ class TestgenResolveTests(unittest.TestCase):
         self.store = RequirementStore(Path(self.temp_dir.name) / "requirements.db")
         self.store_patcher = patch.object(server, "requirements_store", self.store)
         self.store_patcher.start()
+        # Isolate from the real, committed backend/data/supporting_info.json too.
+        self.supporting_info_path = Path(self.temp_dir.name) / "supporting_info.json"
+        self.supporting_info_patcher = patch.object(server, "SUPPORTING_INFO_PATH", self.supporting_info_path)
+        self.supporting_info_patcher.start()
 
     def tearDown(self):
         self.store_patcher.stop()
+        self.supporting_info_patcher.stop()
         self.temp_dir.cleanup()
         for collection in (server.db.category_strategies, server.db.test_cases, server.db.test_gaps):
             for doc in run(collection.find({}, {"_id": 0}).to_list(1000)):
@@ -453,6 +458,128 @@ class TestgenResolveTests(unittest.TestCase):
         with self.assertRaises(HTTPException) as ctx:
             run(server.dismiss_gap(gap_id))
         self.assertEqual(ctx.exception.status_code, 409)
+
+    # ---------- persistent supporting-info file ----------
+
+    def test_resolve_answer_auto_appends_supporting_info_fact(self):
+        self._seed_requirement("REQ-002", "The system shall be fast.")
+
+        async def fake_insufficient(provider, model, sys_msg, user, ollama_url=None):
+            return json.dumps(
+                {
+                    "category": "Performance / timing",
+                    "sufficient": False,
+                    "gaps": [{"item": "response time threshold", "why": "no numeric value given"}],
+                }
+            )
+
+        with patch.object(server, "llm_complete", fake_insufficient):
+            response = run(server.generate_test_cases(server.GenerateBody()))
+        gap_id = response["results"][0]["gaps"][0]["gap_id"]
+
+        fake_resolve = self._fake_llm(
+            assess_response={"category": "Performance / timing", "sufficient": True, "gaps": []},
+            generate_response={
+                "preconditions": ["Nominal operating conditions."],
+                "steps": ["Trigger the operation.", "Measure response time."],
+                "acceptance_criteria": ["Response time <= 150 ms."],
+                "verification_method": "test",
+            },
+        )
+        with patch.object(server, "llm_complete", fake_resolve):
+            run(
+                server.resolve_gap(
+                    server.ResolveBody(gap_id=gap_id, resolution_type="answer", answer="150 ms maximum response time")
+                )
+            )
+
+        facts = run(server.list_supporting_info())
+        self.assertEqual(len(facts), 1)
+        self.assertIn("150 ms maximum response time", facts[0]["text"])
+        self.assertEqual(facts[0]["source"], "resolve_answer")
+        self.assertEqual(facts[0]["requirement_id"], "REQ-002")
+
+    def test_resolve_authorize_fill_does_not_auto_append_supporting_info(self):
+        # authorize_fill is an engine guess, not a confirmed human fact - it must stay
+        # ephemeral (per-test-case assumption only) until explicitly promoted via
+        # POST /testgen/supporting-info/confirm.
+        self._seed_requirement("REQ-002", "The system shall be fast.")
+
+        async def fake_insufficient(provider, model, sys_msg, user, ollama_url=None):
+            return json.dumps(
+                {"category": "Performance / timing", "sufficient": False, "gaps": [{"item": "x", "why": "y"}]}
+            )
+
+        with patch.object(server, "llm_complete", fake_insufficient):
+            response = run(server.generate_test_cases(server.GenerateBody()))
+        gap_id = response["results"][0]["gaps"][0]["gap_id"]
+
+        async def fake_resolve(provider, model, sys_msg, user, ollama_url=None):
+            if sys_msg == AUTHORIZE_FILL_PROMPT:
+                return json.dumps({"value": "200 ms", "rationale": "typical bound", "confidence": "medium"})
+            if sys_msg == CLASSIFY_AND_ASSESS_PROMPT:
+                return json.dumps({"category": "Performance / timing", "sufficient": True, "gaps": []})
+            return json.dumps(
+                {
+                    "preconditions": ["Nominal operating conditions."],
+                    "steps": ["Trigger.", "Measure."],
+                    "acceptance_criteria": ["Response time <= 200 ms."],
+                    "verification_method": "test",
+                }
+            )
+
+        with patch.object(server, "llm_complete", fake_resolve):
+            run(server.resolve_gap(server.ResolveBody(gap_id=gap_id, resolution_type="authorize_fill")))
+
+        self.assertEqual(run(server.list_supporting_info()), [])
+
+    def test_generate_injects_supporting_info_into_both_prompts(self):
+        self._seed_requirement("REQ-002", "The system shall be fast.")
+        run(
+            server.confirm_supporting_info(
+                server.SupportingInfoConfirmBody(
+                    text="All electrical faults are simulated with electronic loads or fault injection."
+                )
+            )
+        )
+        seen_messages = []
+
+        async def fake(provider, model, sys_msg, user, ollama_url=None):
+            seen_messages.append(user)
+            if sys_msg == CLASSIFY_AND_ASSESS_PROMPT:
+                return json.dumps({"category": "Performance / timing", "sufficient": True, "gaps": []})
+            return json.dumps(
+                {
+                    "preconditions": ["Nominal operating conditions."],
+                    "steps": ["Trigger.", "Measure."],
+                    "acceptance_criteria": ["Response time <= 200 ms."],
+                    "verification_method": "test",
+                }
+            )
+
+        with patch.object(server, "llm_complete", fake):
+            run(server.generate_test_cases(server.GenerateBody()))
+
+        self.assertEqual(len(seen_messages), 2)
+        for message in seen_messages:
+            self.assertIn("electronic loads or fault injection", message)
+
+    def test_supporting_info_confirm_list_and_delete(self):
+        fact = run(
+            server.confirm_supporting_info(
+                server.SupportingInfoConfirmBody(text="A test-only default fact.", requirement_id="REQ-002")
+            )
+        )
+        self.assertEqual(fact["source"], "manual")
+        self.assertEqual(run(server.list_supporting_info()), [fact])
+
+        run(server.delete_supporting_info(fact["id"]))
+        self.assertEqual(run(server.list_supporting_info()), [])
+
+    def test_delete_unknown_supporting_info_404s(self):
+        with self.assertRaises(HTTPException) as ctx:
+            run(server.delete_supporting_info("nope"))
+        self.assertEqual(ctx.exception.status_code, 404)
 
 
 if __name__ == "__main__":

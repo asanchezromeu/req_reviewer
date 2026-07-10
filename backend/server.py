@@ -34,6 +34,7 @@ try:
     from .llm_contract import extract_json
     from . import deterministic_review
     from . import model_registry
+    from . import supporting_info
     from .testgen_prompts import (
         CONTEXT_ANALYSIS_PROMPT,
         DEFAULT_CATEGORY_STRATEGIES,
@@ -54,6 +55,7 @@ except ImportError:
     from llm_contract import extract_json
     import deterministic_review
     import model_registry
+    import supporting_info
     from testgen_prompts import (
         CONTEXT_ANALYSIS_PROMPT,
         DEFAULT_CATEGORY_STRATEGIES,
@@ -65,6 +67,8 @@ except ImportError:
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
+
+SUPPORTING_INFO_PATH = Path(os.environ.get("SUPPORTING_INFO_PATH", str(supporting_info.DEFAULT_PATH)))
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("reqiq")
@@ -1302,11 +1306,15 @@ async def _generate_for_requirement(
     assumption_listing = "\n".join(
         f"- {a['text']}: {a['value']} ({a['rationale']})" for a in extra_assumptions
     )
+    supporting_listing = supporting_info.format_supporting_info(
+        supporting_info.load_supporting_info(SUPPORTING_INFO_PATH)
+    )
 
     assess_user_message = (
         f"Requirement: [{req_id}] {req_text}\n\n"
         f"Known categories:\n{category_listing}\n\n"
-        f"Project test context:\n{context_listing}"
+        f"Project test context:\n{context_listing}\n\n"
+        f"Confirmed supporting info (applies across requirements unless contradicted):\n{supporting_listing}"
     )
     if assumption_listing:
         assess_user_message += f"\n\nAuthorized assumptions for this requirement:\n{assumption_listing}"
@@ -1331,7 +1339,8 @@ async def _generate_for_requirement(
         f"Requirement: [{req_id}] {req_text}\n\n"
         f"Category: {category}\n"
         f"Category strategy: {strategy_instructions}\n\n"
-        f"Project test context:\n{context_listing}"
+        f"Project test context:\n{context_listing}\n\n"
+        f"Confirmed supporting info (applies across requirements unless contradicted):\n{supporting_listing}"
     )
     if assumption_listing:
         generate_user_message += f"\n\nAuthorized assumptions for this requirement:\n{assumption_listing}"
@@ -1444,6 +1453,12 @@ async def resolve_gap(body: ResolveBody):
         new_context = TestContext(version=next_version, items=items, questions=questions)
         await db.test_context_versions.insert_one(new_context.model_dump())
         context = new_context.model_dump()
+        supporting_info.append_supporting_fact(
+            text=f"{gap['item']}: {body.answer}",
+            source="resolve_answer",
+            requirement_id=requirement["id"],
+            path=SUPPORTING_INFO_PATH,
+        )
     elif body.resolution_type == "authorize_fill":
         fill_user_message = (
             f"Requirement: [{requirement['id']}] {requirement['text']}\n\n"
@@ -1506,6 +1521,43 @@ async def dismiss_gap(gap_id: str):
         raise HTTPException(status_code=409, detail="This gap is not open")
     await db.test_gaps.update_one({"id": gap_id}, {"$set": {"status": "dismissed"}})
     return {"dismissed": True}
+
+
+# ----- Test generation: persistent supporting-info defaults -----
+# Confirmed domain-knowledge facts (e.g. "all electrical faults are simulated either with
+# electronic loads or with fault injection") that should apply across requirements/generations
+# and survive restarts - unlike `db.test_context_versions`, which lives in MemoryDatabase by
+# default. `answer` resolutions auto-append here (submitting the answer is the confirmation);
+# `authorize_fill` proposals stay ephemeral per-test-case assumptions until explicitly promoted
+# via the confirm endpoint below.
+
+class SupportingInfoConfirmBody(BaseModel):
+    text: str
+    requirement_id: Optional[str] = None
+    source: str = "manual"
+
+
+@api.get("/testgen/supporting-info")
+async def list_supporting_info():
+    return supporting_info.load_supporting_info(SUPPORTING_INFO_PATH)
+
+
+@api.post("/testgen/supporting-info/confirm")
+async def confirm_supporting_info(body: SupportingInfoConfirmBody):
+    return supporting_info.append_supporting_fact(
+        text=body.text,
+        source=body.source,
+        requirement_id=body.requirement_id,
+        path=SUPPORTING_INFO_PATH,
+    )
+
+
+@api.delete("/testgen/supporting-info/{fact_id}")
+async def delete_supporting_info(fact_id: str):
+    removed = supporting_info.remove_supporting_fact(fact_id, path=SUPPORTING_INFO_PATH)
+    if not removed:
+        raise HTTPException(status_code=404, detail=f"Unknown supporting-info fact id: {fact_id}")
+    return {"deleted": True}
 
 
 @api.post("/datasets/export")

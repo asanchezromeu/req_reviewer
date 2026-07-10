@@ -922,7 +922,7 @@
             "type": "string"
           },
           "summary_top_k": {
-            "default": 3,
+            "default": 6,
             "title": "Summary Top K",
             "type": "integer"
           }
@@ -931,6 +931,35 @@
           "query"
         ],
         "title": "SummaryBody",
+        "type": "object"
+      },
+      "SupportingInfoConfirmBody": {
+        "properties": {
+          "requirement_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requirement Id"
+          },
+          "source": {
+            "default": "manual",
+            "title": "Source",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "SupportingInfoConfirmBody",
         "type": "object"
       },
       "SystemPrompt": {
@@ -2722,6 +2751,98 @@
           }
         },
         "summary": "Resolve Gap"
+      }
+    },
+    "/api/testgen/supporting-info": {
+      "get": {
+        "deprecated": true,
+        "operationId": "list_supporting_info_api_testgen_supporting_info_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Supporting Info"
+      }
+    },
+    "/api/testgen/supporting-info/confirm": {
+      "post": {
+        "deprecated": true,
+        "operationId": "confirm_supporting_info_api_testgen_supporting_info_confirm_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SupportingInfoConfirmBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Confirm Supporting Info"
+      }
+    },
+    "/api/testgen/supporting-info/{fact_id}": {
+      "delete": {
+        "deprecated": true,
+        "operationId": "delete_supporting_info_api_testgen_supporting_info__fact_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "fact_id",
+            "required": true,
+            "schema": {
+              "title": "Fact Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Supporting Info"
       }
     },
     "/api/testgen/testcases": {
@@ -4727,6 +4848,110 @@
           }
         ],
         "summary": "Resolve Gap"
+      }
+    },
+    "/api/v1/testgen/supporting-info": {
+      "get": {
+        "operationId": "list_supporting_info_api_v1_testgen_supporting_info_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Supporting Info"
+      }
+    },
+    "/api/v1/testgen/supporting-info/confirm": {
+      "post": {
+        "operationId": "confirm_supporting_info_api_v1_testgen_supporting_info_confirm_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SupportingInfoConfirmBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Confirm Supporting Info"
+      }
+    },
+    "/api/v1/testgen/supporting-info/{fact_id}": {
+      "delete": {
+        "operationId": "delete_supporting_info_api_v1_testgen_supporting_info__fact_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "fact_id",
+            "required": true,
+            "schema": {
+              "title": "Fact Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Supporting Info"
       }
     },
     "/api/v1/testgen/testcases": {

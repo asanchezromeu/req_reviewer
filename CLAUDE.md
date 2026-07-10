@@ -41,7 +41,7 @@ python -m unittest backend.tests.test_retrieval backend.tests.test_conflict_prec
   backend.tests.test_model_registry backend.tests.test_dataset_export \
   backend.tests.test_model_registry_routes backend.tests.test_model_evaluate \
   backend.tests.test_testgen_context backend.tests.test_testgen_generation \
-  backend.tests.test_testgen_resolve -v
+  backend.tests.test_testgen_resolve backend.tests.test_supporting_info -v
   # ^ all stdlib+fastapi TestClient only, no live server or Ollama needed (LLM calls are mocked).
 pytest backend/tests/test_reqiq_api.py     # hits a running server; BASE_URL/REACT_APP_BACKEND_URL env, defaults to http://localhost:8000
 pytest backend/tests/test_reqiq_iter2.py
@@ -234,6 +234,20 @@ python -m unittest tests.test_req_analysis -v
     user has decided isn't worth chasing further. Sets `status: "dismissed"`, a distinct value from
     `"resolved"` (which means an actual answer/authorize_fill regenerated through it) so the gap's
     history stays honest rather than looking like it was fixed. 404 unknown, 409 if not `open`.
+  - **Persistent supporting-info file** — `backend/supporting_info.py` + `backend/data/supporting_info.json`
+    (git-tracked, unlike `backend/data/*.db` — only `*.db` is gitignored). Solves a real durability
+    gap: `db.test_context_versions`/`db.test_gaps` live in `MemoryDatabase` by default and are wiped
+    on every restart, but confirmed domain-knowledge defaults (e.g. "all electrical faults are
+    simulated either with electronic loads or with fault injection", the seeded entry) need to
+    survive that. `_generate_for_requirement` loads and injects this file's contents into both LLM
+    calls (`SUPPORTING_INFO_PATH` env var overrides the default path, same pattern as
+    `REQUIREMENTS_DB_PATH`). `POST /testgen/resolve`'s `answer` path auto-appends the fact (the
+    user's own words are the confirmation); the `authorize_fill` path stays exactly as before
+    (ephemeral, per-test-case `assumptions` only) — an LLM-guessed value only reaches this file via
+    the separate `POST /testgen/supporting-info/confirm` endpoint, an explicit human promotion step
+    (wired to a "save to supporting info" link per assumption in `testgen_console.html`). `GET
+    /testgen/supporting-info` lists current facts; `DELETE /testgen/supporting-info/{fact_id}`
+    removes a mistaken one (404 unknown).
 
 **`backend/retrieval.py`** (renamed from `showcase.py` in Phase 1 — this is now "the" requirements
 store, not a demo-specific module) is self-contained: its own SQLite store, embeddings, and search

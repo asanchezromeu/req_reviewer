@@ -80,6 +80,14 @@
     <div id="ctxItems" style="margin-top:8px;"></div>
     <h2 style="margin-top:16px;">Open questions</h2>
     <div id="ctxQuestions"></div>
+
+    <h2 style="margin-top:16px;">Supporting info (persistent defaults)</h2>
+    <div class="muted">Confirmed domain facts, applied across every requirement and generation, saved to a file on disk that survives restarts.</div>
+    <div id="supportingInfoList" style="margin-top:8px;"></div>
+    <div class="row">
+      <input id="newFactInput" type="text" placeholder="Add a default fact...">
+      <button onclick="addManualFact()">Add</button>
+    </div>
   </section>
 </main>
 
@@ -171,6 +179,7 @@ document.getElementById('generateBtn').addEventListener('click', async () => {
 });
 
 function testCaseBodyHtml(tc, category) {
+  const reqId = (tc.requirement_ids || [])[0] || '';
   return `
     category: ${esc(category)}
     ${tc.review_flags && tc.review_flags.length ? ' &mdash; flags: ' + tc.review_flags.map(esc).join(', ') : ''}
@@ -178,7 +187,7 @@ function testCaseBodyHtml(tc, category) {
     <h3 style="font-size:12px;">Steps</h3><ul>${tc.steps.map(s => `<li>${esc(s)}</li>`).join('')}</ul>
     <h3 style="font-size:12px;">Acceptance criteria</h3><ul>${tc.acceptance_criteria.map(a => `<li>${esc(a)}</li>`).join('')}</ul>
     <div class="muted">verification: ${esc(tc.verification_method)}</div>
-    ${tc.assumptions && tc.assumptions.length ? '<h3 style="font-size:12px;">Assumptions</h3><ul>' + tc.assumptions.map(a => `<li>${esc(a.text)}: <b>${esc(a.value)}</b> (${esc(a.confidence)}) &mdash; ${esc(a.rationale)}</li>`).join('') + '</ul>' : ''}
+    ${tc.assumptions && tc.assumptions.length ? '<h3 style="font-size:12px;">Assumptions</h3><ul>' + tc.assumptions.map(a => `<li>${esc(a.text)}: <b>${esc(a.value)}</b> (${esc(a.confidence)}) &mdash; ${esc(a.rationale)} &mdash; <a class="link" onclick='confirmAssumptionAsSupportingInfo(${JSON.stringify(a.text)}, ${JSON.stringify(a.value)}, ${JSON.stringify(reqId)})'>save to supporting info</a></li>`).join('') + '</ul>' : ''}
   `;
 }
 
@@ -252,6 +261,7 @@ async function resolveGap(gapId, resolutionType, answer, resultEl) {
     renderResult(data, resultEl);
     loadGaps();
     loadTestCases();
+    if (resolutionType === 'answer') loadSupportingInfo(); // answer path auto-appends to the file
   } catch (err) {
     resultEl.innerHTML = `<span class="badge error">error</span> ${esc(err.message)}`;
   }
@@ -373,10 +383,44 @@ async function answerQuestion(questionId) {
   loadContext();
 }
 
+async function loadSupportingInfo() {
+  const facts = await api('/testgen/supporting-info');
+  const list = document.getElementById('supportingInfoList');
+  if (!facts.length) { list.innerHTML = '<div class="muted">No supporting info recorded yet.</div>'; return; }
+  list.innerHTML = facts.map(f => `
+    <div class="ctx-item">
+      <div>${esc(f.text)}${f.requirement_id ? ' <span class="muted">(' + esc(f.requirement_id) + ')</span>' : ''}</div>
+      <a class="link" onclick="deleteSupportingInfoFact('${f.id}')">remove</a>
+    </div>`).join('');
+}
+
+async function addManualFact() {
+  const input = document.getElementById('newFactInput');
+  const text = input.value.trim();
+  if (!text) return;
+  await api('/testgen/supporting-info/confirm', { method: 'POST', body: JSON.stringify({ text, source: 'manual' }) });
+  input.value = '';
+  loadSupportingInfo();
+}
+
+async function confirmAssumptionAsSupportingInfo(item, value, requirementId) {
+  await api('/testgen/supporting-info/confirm', {
+    method: 'POST',
+    body: JSON.stringify({ text: item + ': ' + value, requirement_id: requirementId || null, source: 'resolve_authorize_fill_confirmed' }),
+  });
+  loadSupportingInfo();
+}
+
+async function deleteSupportingInfoFact(id) {
+  await api('/testgen/supporting-info/' + encodeURIComponent(id), { method: 'DELETE' });
+  loadSupportingInfo();
+}
+
 loadRequirements();
 loadContext();
 loadGaps();
 loadTestCases();
+loadSupportingInfo();
 </script>
 </body>
 </html>
