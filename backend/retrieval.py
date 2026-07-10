@@ -534,7 +534,16 @@ def normalize_token(token: str) -> str:
     if len(token) > 4 and token.endswith("ies"):
         return token[:-3] + "y"
     if len(token) > 5 and token.endswith("ing"):
-        return token[:-3]
+        stem = token[:-3]
+        if len(stem) > 2 and stem[-1] == stem[-2] and stem[-1] not in "aeiou":
+            # doubled consonant before "ing" (running -> runn -> run)
+            stem = stem[:-1]
+        elif stem.endswith("at"):
+            # common "-ate" verb family (operate/activate/calibrate -> operating/...) -
+            # found live: "operating" stemmed to "operat" while the requirement's own
+            # "operate" stayed unstemmed, so a real match scored zero keyword overlap.
+            stem = stem + "e"
+        return stem
     if len(token) > 4 and token.endswith("ed"):
         return token[:-2]
     if len(token) > 3 and token.endswith("s"):
@@ -661,6 +670,23 @@ def ranked_matches(
     best_score = ranked[0]["score"] if ranked else 0.0
     relative_floor = max(threshold, best_score - 0.18)
     matches = [item for item in ranked if item["score"] >= relative_floor]
+    # A candidate can have the single best embedding (semantic) similarity of the whole
+    # set and still get crushed out of the combined-score floor by one weak heuristic
+    # component (keyword/structural/phrase) - found live: a requirement the embedding
+    # model ranked highest for "operating voltage" scored a flat 0.0 on keyword overlap
+    # and never reached LLM verification at all. Always admit *the single* best-by-
+    # embedding candidate, so the verification step (the actual semantic judgment layer)
+    # gets a chance to weigh in rather than the crude heuristics silently deciding the
+    # case beforehand. Deliberately just the one, not a margin or a wider top-K - both
+    # of those admit many/all candidates whenever embeddings cluster tightly together
+    # (common for short technical phrases, and trivially true when the whole candidate
+    # pool is small), which defeats keyword-based discrimination in exactly the case
+    # it's needed most.
+    match_ids = {item["id"] for item in matches}
+    best_embedding_item = max(ranked, key=lambda item: item["breakdown"]["embedding"], default=None)
+    if best_embedding_item is not None and best_embedding_item["id"] not in match_ids:
+        matches.append(best_embedding_item)
+    matches.sort(key=lambda item: item["score"], reverse=True)
     return {
         "ranked": ranked,
         "matches": matches,

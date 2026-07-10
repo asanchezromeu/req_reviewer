@@ -15,6 +15,7 @@ try:
         extract_parameters,
         fallback_summary,
         extract_quantities,
+        normalize_token,
         parse_import,
         ranked_matches,
         select_summary_sources,
@@ -32,6 +33,7 @@ except ImportError:
         extract_parameters,
         fallback_summary,
         extract_quantities,
+        normalize_token,
         parse_import,
         ranked_matches,
         select_summary_sources,
@@ -290,6 +292,76 @@ class ParameterExtractionTests(unittest.TestCase):
         # A requirement stating a duration ("200 ms") shouldn't spuriously match a
         # voltage query just because both fall through the same code path.
         self.assertEqual(structural_score("nominal voltage", "The system shall respond within 200 ms."), 0.0)
+
+
+class StemmingTests(unittest.TestCase):
+    # Regression coverage for a real live-testing finding: "operating voltage" scored
+    # zero keyword overlap against a requirement containing "operate", because naive
+    # "-ing" suffix stripping doesn't reverse English's silent-e-drop spelling rule
+    # ("operate" -> "operating" drops the e; stripping "ing" alone gives "operat", not
+    # "operate"). This crushed an otherwise-best-matching candidate below the ranking
+    # floor before it ever reached LLM verification.
+
+    def test_ate_verb_family_matches_its_gerund(self):
+        self.assertEqual(normalize_token("operating"), normalize_token("operate"))
+        self.assertEqual(normalize_token("activating"), normalize_token("activate"))
+        self.assertEqual(normalize_token("calibrating"), normalize_token("calibrate"))
+
+    def test_doubled_consonant_before_ing_still_destems_correctly(self):
+        self.assertEqual(normalize_token("running"), normalize_token("run"))
+
+    def test_ordinary_ing_stripping_unaffected(self):
+        self.assertEqual(normalize_token("monitoring"), normalize_token("monitor"))
+        self.assertEqual(normalize_token("logging"), "log")
+
+
+class EmbeddingSafetyNetTests(unittest.TestCase):
+    # Regression coverage for the other half of the same live finding: even after the
+    # stemming fix, a candidate can still fall just short of the combined-score ranking
+    # floor. ranked_matches always admits the single best-by-embedding candidate as a
+    # safety net, so the LLM verification step (the real semantic judgment layer) gets
+    # a chance to weigh in rather than a purely heuristic combined score silently
+    # excluding it.
+
+    def test_best_embedding_candidate_is_rescued_below_the_combined_score_floor(self):
+        # HIGH_KEYWORD's full keyword+phrase match drives the relative floor up to
+        # ~0.64; BEST_EMBEDDING's own combined score (~0.56) falls below that floor
+        # despite having the single highest embedding similarity of the two (~0.99
+        # vs ~0.50) - without the safety net it would never reach LLM verification,
+        # exactly the live failure this regression test is for.
+        indexed = [
+            {
+                "id": "HIGH_KEYWORD",
+                "text": "The system operating voltage shall be regulated within tolerance.",
+                "source": None,
+                "vector": [0.5, 0.87],
+            },
+            {
+                "id": "BEST_EMBEDDING",
+                "text": "The PBDU shall operate from a nominal 12 V vehicle electrical supply.",
+                "source": None,
+                "vector": [0.99, 0.14],
+            },
+        ]
+        result = ranked_matches(indexed, [1.0, 0.0], query="operating voltage")
+        by_id = {item["id"]: item for item in result["ranked"]}
+        floor = max(0.30, result["best_score"] - 0.18)
+        self.assertLess(by_id["BEST_EMBEDDING"]["score"], floor)
+        ids = [item["id"] for item in result["matches"]]
+        self.assertIn("BEST_EMBEDDING", ids)
+
+    def test_safety_net_does_not_override_keyword_discrimination_when_embeddings_tie(self):
+        # When embeddings can't meaningfully discriminate (all near-identical - the
+        # realistic case for short technical phrases), keyword/parameter matching must
+        # still be what determines relevance; the safety net should not blanket-admit
+        # every near-tied candidate.
+        indexed = [
+            {"id": "RELEVANT", "text": "The system shall withstand a nominal current of 1A.", "source": None, "vector": [1.0, 0.0]},
+            {"id": "IRRELEVANT", "text": "Each system requirement shall have a unique identifier.", "source": None, "vector": [0.99, 0.01]},
+        ]
+        result = ranked_matches(indexed, [1.0, 0.0], query="What nominal current shall the system withstand?")
+        ids = [item["id"] for item in result["matches"]]
+        self.assertNotIn("IRRELEVANT", ids)
 
 
 if __name__ == "__main__":
