@@ -141,6 +141,21 @@ class AntiGenericityLintTests(unittest.TestCase):
         violations = check_anti_genericity(generated, "The zone controller shall respond within 200 ms.", [], [])
         self.assertEqual(violations, [])
 
+    def test_value_grounded_in_supporting_info_not_flagged(self):
+        # Regression test for a live-deployment finding: a value the model correctly pulled
+        # from a confirmed supporting-info fact (e.g. "ISO 16750") was being flagged as
+        # untraceable, since the digit pool only checked the requirement/context/assumptions.
+        generated = {
+            "preconditions": ["Measurement points and supply conditions per ISO 16750."],
+            "acceptance_criteria": ["Response time <= 200 ms."],
+            "verification_method": "test",
+        }
+        supporting_facts = [{"text": "Use an ISO 16750-style profile for all electrical tests."}]
+        violations = check_anti_genericity(
+            generated, "The system shall respond within 200 ms.", [], [], supporting_facts
+        )
+        self.assertEqual(violations, [])
+
     def test_self_flagged_placeholder_line_not_double_flagged(self):
         # A line the model already honestly marked as missing shouldn't also trip the
         # generic-wording, missing-measure, or untraceable-value lint - that would just be a

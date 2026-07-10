@@ -1309,9 +1309,8 @@ async def _generate_for_requirement(
     assumption_listing = "\n".join(
         f"- {a['text']}: {a['value']} ({a['rationale']})" for a in extra_assumptions
     )
-    supporting_listing = supporting_info.format_supporting_info(
-        supporting_info.load_supporting_info(SUPPORTING_INFO_PATH)
-    )
+    supporting_facts = supporting_info.load_supporting_info(SUPPORTING_INFO_PATH)
+    supporting_listing = supporting_info.format_supporting_info(supporting_facts)
 
     assess_user_message = (
         f"Requirement: [{req_id}] {req_text}\n\n"
@@ -1374,7 +1373,7 @@ async def _generate_for_requirement(
         open_gaps.extend(gap_dicts)
 
     context_items = context["items"] if context else []
-    violations = check_anti_genericity(generated, req_text, context_items, extra_assumptions)
+    violations = check_anti_genericity(generated, req_text, context_items, extra_assumptions, supporting_facts)
     if violations:
         gap_dicts = await _persist_gaps(req_id, violations, "self_review")
         open_gaps.extend(gap_dicts)

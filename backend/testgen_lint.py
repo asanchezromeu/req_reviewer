@@ -68,7 +68,10 @@ def _missing_measure_violations(criteria: List[str], require_quantity: bool) -> 
 
 
 def _traceable_digits(
-    requirement_text: str, context_items: List[Dict[str, Any]], assumptions: List[Dict[str, Any]]
+    requirement_text: str,
+    context_items: List[Dict[str, Any]],
+    assumptions: List[Dict[str, Any]],
+    supporting_facts: List[Dict[str, Any]] = None,
 ) -> set:
     # Compares on the bare numeral rather than the number+unit token, since a value can be
     # phrased with a different unit word in the source than in the generated text (e.g. an
@@ -77,6 +80,7 @@ def _traceable_digits(
     pool_parts = [requirement_text]
     pool_parts += [str(item.get("value", "")) for item in context_items]
     pool_parts += [f"{a.get('text', '')} {a.get('value', '')}" for a in assumptions]
+    pool_parts += [str(f.get("text", "")) for f in (supporting_facts or [])]
     pool = "\n".join(pool_parts)
     return {m.group(0) for m in _DIGIT_RE.finditer(pool)}
 
@@ -108,6 +112,7 @@ def check_anti_genericity(
     requirement_text: str,
     context_items: List[Dict[str, Any]],
     assumptions: List[Dict[str, Any]],
+    supporting_facts: List[Dict[str, Any]] = None,
 ) -> List[Dict[str, str]]:
     verification_method = str(generated.get("verification_method", "test"))
     preconditions = [str(x) for x in generated.get("preconditions", []) or []]
@@ -127,7 +132,7 @@ def check_anti_genericity(
     require_quantity = verification_method == "test" and _has_measure(requirement_text)
     violations += _missing_measure_violations(acceptance_criteria, require_quantity)
 
-    traceable_digits = _traceable_digits(requirement_text, context_items, assumptions or [])
+    traceable_digits = _traceable_digits(requirement_text, context_items, assumptions or [], supporting_facts or [])
     violations += _untraceable_value_violations(preconditions, "precondition", traceable_digits)
     violations += _untraceable_value_violations(acceptance_criteria, "acceptance criterion", traceable_digits)
 
