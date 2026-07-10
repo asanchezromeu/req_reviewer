@@ -1145,7 +1145,7 @@ def _fallback_verdict(candidate_id: str) -> Dict[str, Any]:
 
 
 def _is_valid_verdict(item: Dict[str, Any]) -> bool:
-    return item.get("verdict") in _VALID_VERDICTS
+    return item.get("verdict") in _VALID_VERDICTS and bool(str(item.get("justification") or "").strip())
 
 
 async def verify_candidates(
@@ -1339,7 +1339,12 @@ def create_requirements_router(
             }
 
         enriched = [
-            {**item, "verdict": verdict["verdict"], "justification": verdict["justification"], "facet": verdict.get("facet")}
+            {
+                **item,
+                "verdict": verdict.get("verdict"),
+                "justification": verdict.get("justification"),
+                "facet": verdict.get("facet"),
+            }
             for item, verdict in zip(matches, verdicts)
         ]
         answering = [item for item in enriched if item["verdict"] in ("answers", "partially_answers")]

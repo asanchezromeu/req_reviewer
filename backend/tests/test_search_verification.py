@@ -128,6 +128,34 @@ class VerifyCandidatesTests(unittest.TestCase):
         self.assertEqual(by_id["REQ-002"]["verdict"], "does_not_answer")
         self.assertEqual(by_id["REQ-003"]["verdict"], "does_not_answer")
 
+    def test_verdict_missing_justification_gets_fallback_not_a_crash(self):
+        # Regression test for a real crash seen live: a verdict with a valid
+        # "verdict" value but no "justification" key used to pass through
+        # reconciliation as-is (only "verdict" was checked), then crashed the
+        # /search endpoint with a KeyError on verdict["justification"].
+        fake_llm = _llm_returning(
+            {
+                "verdicts": [
+                    {"id": "REQ-001", "verdict": "answers", "facet": ""},
+                    {"id": "REQ-002", "verdict": "does_not_answer", "justification": "", "facet": ""},
+                    {"id": "REQ-003", "verdict": "does_not_answer", "justification": "Unrelated.", "facet": ""},
+                ]
+            }
+        )
+
+        verdicts, unverified = run(
+            retrieval.verify_candidates(fake_llm, "ollama", "gemma3:1b", "http://x", "nominal current?", CANDIDATES)
+        )
+
+        self.assertFalse(unverified)
+        by_id = {v["id"]: v for v in verdicts}
+        # Missing or blank justification -> deterministic fallback, not the
+        # model's (invalid) item passed through.
+        self.assertEqual(by_id["REQ-001"]["justification"], "Verification unavailable for this candidate.")
+        self.assertEqual(by_id["REQ-002"]["justification"], "Verification unavailable for this candidate.")
+        self.assertEqual(by_id["REQ-003"]["verdict"], "does_not_answer")
+        self.assertEqual(by_id["REQ-003"]["justification"], "Unrelated.")
+
 
 class SearchCardinalityRouteTests(unittest.TestCase):
     def setUp(self):
