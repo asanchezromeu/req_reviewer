@@ -20,6 +20,7 @@ try:
         ranked_matches,
         select_summary_sources,
         structural_score,
+        SummaryBody,
     )
 except ImportError:
     from retrieval import (
@@ -38,6 +39,7 @@ except ImportError:
         ranked_matches,
         select_summary_sources,
         structural_score,
+        SummaryBody,
     )
 
 
@@ -209,6 +211,40 @@ class RequirementStoreTests(unittest.TestCase):
         self.assertIn("20A", answer)
         self.assertIn("REQ-073", answer)
 
+    def test_fallback_summary_multi_source_no_quantity_reads_like_an_answer_not_a_debug_dump(self):
+        # Regression test: the old wording ("treat the result as non-unique and review the
+        # cited requirements") read like an instruction to an analyst, not an answer for a PM.
+        answer = fallback_summary(
+            "What is the system's operating voltage?",
+            [
+                {"id": "PBDU-CON-001", "text": "The PBDU shall use an automotive-grade MCU suitable for the intended temperature and voltage operating range."},
+                {"id": "PBDU-PLC-005", "text": "The PBDU shall prevent activation of a power load channel when the input supply voltage is outside the allowed operating range."},
+            ],
+        )
+        self.assertIn("No single requirement gives one definitive answer", answer)
+        self.assertNotIn("treat the result as non-unique", answer.lower())
+        self.assertNotIn("review the cited requirements", answer.lower())
+        self.assertIn("PBDU-CON-001", answer)
+        self.assertIn("PBDU-PLC-005", answer)
+
+    def test_fallback_summary_single_source_reads_like_an_answer(self):
+        # Deliberately no numeric quantity in query or text, so this exercises the plain
+        # single-source branch rather than summarize_quantitative_answer's cleaner path.
+        answer = fallback_summary(
+            "What communication interfaces does the system support?",
+            [{"id": "PBDU-COM-001", "text": "The PBDU shall support CAN communication with external vehicle control units."}],
+        )
+        self.assertNotIn("most relevant evidence", answer.lower())
+        self.assertTrue(answer.startswith("Based on PBDU-COM-001"))
+        self.assertIn("CAN communication", answer)
+
+    def test_summary_top_k_default_is_widened(self):
+        # Regression test: retrieval ranking for a single "best" source is brittle to exact
+        # query phrasing (see the structural_score/stemmer fix and the embedding safety net) -
+        # /summary needs enough breadth that a source cut by too narrow a top-k still reaches
+        # the LLM. summary_top_k=3 was too narrow live; widened to 6.
+        self.assertEqual(SummaryBody(query="x").summary_top_k, 6)
+
     def test_extract_quantities_keeps_value_and_unit(self):
         quantities = extract_quantities("The PDU shall withstand 20A nominal current during 100s.")
         self.assertEqual(["20A", "100s"], [quantity["text"] for quantity in quantities])
@@ -362,6 +398,39 @@ class EmbeddingSafetyNetTests(unittest.TestCase):
         result = ranked_matches(indexed, [1.0, 0.0], query="What nominal current shall the system withstand?")
         ids = [item["id"] for item in result["matches"]]
         self.assertNotIn("IRRELEVANT", ids)
+
+    def test_embedding_rescue_count_widens_beyond_the_single_best(self):
+        # /summary passes a higher embedding_rescue_count than /search's default of 1,
+        # since synthesizing across several sources can afford - and benefits from - a
+        # wider net than picking one answer does. Verified live: the requirement stating
+        # the actual value ranked #2 by embedding (not #1) for one real query phrasing.
+        indexed = [
+            {
+                "id": "HIGH_KEYWORD",
+                "text": "The system operating voltage shall be regulated within tolerance.",
+                "source": None,
+                "vector": [0.5, 0.87],
+            },
+            {
+                "id": "SECOND_BEST",
+                "text": "The PBDU shall operate from a nominal 12 V vehicle electrical supply.",
+                "source": None,
+                "vector": [0.99, 0.14],
+            },
+            {
+                "id": "THIRD_BEST",
+                "text": "The PBDU shall measure the operating input at the main terminal.",
+                "source": None,
+                "vector": [0.95, 0.31],
+            },
+        ]
+        default_result = ranked_matches(indexed, [1.0, 0.0], query="operating voltage")
+        self.assertNotIn("THIRD_BEST", [item["id"] for item in default_result["matches"]])
+
+        widened_result = ranked_matches(indexed, [1.0, 0.0], query="operating voltage", embedding_rescue_count=3)
+        widened_ids = [item["id"] for item in widened_result["matches"]]
+        self.assertIn("SECOND_BEST", widened_ids)
+        self.assertIn("THIRD_BEST", widened_ids)
 
 
 if __name__ == "__main__":

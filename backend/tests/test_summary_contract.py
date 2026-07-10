@@ -6,11 +6,11 @@ from unittest.mock import patch
 
 try:
     from backend import retrieval
-    from backend.retrieval import create_requirements_router, summary_violates_contract
+    from backend.retrieval import create_requirements_router, ollama_summary, summary_violates_contract
     from backend.summary_prompts import EXECUTIVE_SUMMARY_PROMPT
 except ImportError:
     import retrieval
-    from retrieval import create_requirements_router, summary_violates_contract
+    from retrieval import create_requirements_router, ollama_summary, summary_violates_contract
     from summary_prompts import EXECUTIVE_SUMMARY_PROMPT
 
 from fastapi import FastAPI
@@ -147,6 +147,34 @@ class SummaryRouteTests(unittest.TestCase):
         self.assertIn("not reachable", body["degraded_reason"])
         self.assertTrue(len(body["summary_text"]) > 0)
         self.assertEqual(set(body["source_ids"]), {"REQ-001", "REQ-002"})
+
+
+class OllamaSummaryRequestTests(unittest.TestCase):
+    # Regression coverage: widening /summary's default source count (SummaryBody.summary_top_k)
+    # without also widening ollama_summary's own token budget would risk the exact truncation
+    # failure mode already root-caused for testgen's llm_complete earlier - more source text
+    # pushed past a too-small num_ctx/num_predict silently cuts the response short.
+
+    def test_sends_a_widened_context_and_output_budget(self):
+        captured = {}
+
+        class FakeResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"message": {"content": "answer.\nSources: REQ-001"}}
+
+        def fake_post(url, json=None, timeout=None):
+            captured["json"] = json
+            return FakeResponse()
+
+        with patch.object(retrieval.requests, "post", fake_post):
+            ollama_summary("http://x", "gemma3:1b", "question?", SOURCES, timeout=30)
+
+        options = captured["json"]["options"]
+        self.assertEqual(options["num_ctx"], 4096)
+        self.assertEqual(options["num_predict"], 400)
 
 
 if __name__ == "__main__":

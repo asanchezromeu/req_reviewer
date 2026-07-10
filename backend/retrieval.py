@@ -72,7 +72,7 @@ class SummaryBody(BaseModel):
     llm_model: str = "gemma3:1b"
     ollama_url: str = "http://localhost:11434"
     min_similarity: float = 0.30
-    summary_top_k: int = 3
+    summary_top_k: int = 6
 
 
 class ReferenceIngestBody(BaseModel):
@@ -655,6 +655,7 @@ def ranked_matches(
     query_vector: List[float],
     query: str = "",
     min_similarity: float = 0.30,
+    embedding_rescue_count: int = 1,
 ) -> Dict[str, Any]:
     threshold = max(0.0, min(1.0, min_similarity))
     idf = build_idf([item["text"] for item in indexed])
@@ -674,18 +675,22 @@ def ranked_matches(
     # set and still get crushed out of the combined-score floor by one weak heuristic
     # component (keyword/structural/phrase) - found live: a requirement the embedding
     # model ranked highest for "operating voltage" scored a flat 0.0 on keyword overlap
-    # and never reached LLM verification at all. Always admit *the single* best-by-
-    # embedding candidate, so the verification step (the actual semantic judgment layer)
-    # gets a chance to weigh in rather than the crude heuristics silently deciding the
-    # case beforehand. Deliberately just the one, not a margin or a wider top-K - both
-    # of those admit many/all candidates whenever embeddings cluster tightly together
-    # (common for short technical phrases, and trivially true when the whole candidate
-    # pool is small), which defeats keyword-based discrimination in exactly the case
-    # it's needed most.
+    # and never reached LLM verification at all. Always admit the top `embedding_rescue_
+    # count` candidates by embedding alone, so the verification/synthesis step (the actual
+    # semantic judgment layer) gets a chance to weigh in rather than the crude heuristics
+    # silently deciding the case beforehand. Defaults to just 1 (not a margin or an
+    # unbounded top-K) because a margin or wide top-K admits many/all candidates whenever
+    # embeddings cluster tightly together (common for short technical phrases, and
+    # trivially true when the whole candidate pool is small), which defeats keyword-based
+    # discrimination in exactly the case it's needed most - /search keeps this default.
+    # /summary passes a higher count deliberately: it synthesizes across several sources
+    # rather than picking one, so it can afford - and benefits from - a wider net.
     match_ids = {item["id"] for item in matches}
-    best_embedding_item = max(ranked, key=lambda item: item["breakdown"]["embedding"], default=None)
-    if best_embedding_item is not None and best_embedding_item["id"] not in match_ids:
-        matches.append(best_embedding_item)
+    by_embedding = sorted(ranked, key=lambda item: item["breakdown"]["embedding"], reverse=True)
+    for item in by_embedding[: max(0, embedding_rescue_count)]:
+        if item["id"] not in match_ids:
+            matches.append(item)
+            match_ids.add(item["id"])
     matches.sort(key=lambda item: item["score"], reverse=True)
     return {
         "ranked": ranked,
@@ -1005,19 +1010,15 @@ def fallback_summary(query: str, sources: List[Dict[str, Any]], warning: Optiona
     if value_summary:
         return value_summary
 
-    lead = f"The most relevant evidence for '{query}' is "
     if len(sources) == 1:
         source = sources[0]
-        return f"{lead}[{source['id']}]: {compact_text(source['text'], 320)}"
+        return f"Based on {source['id']}: {compact_text(source['text'], 320)}"
 
-    evidence = "; ".join(
-        f"[{source['id']}] {compact_text(source['text'], 180)}"
+    bullets = "\n".join(
+        f"- {compact_text(source['text'], 180)} ({source['id']})"
         for source in sources
     )
-    return (
-        f"{lead}{len(sources)} requirements. If they do not state one unique answer, "
-        f"treat the result as non-unique and review the cited requirements: {evidence}"
-    )
+    return f"No single requirement gives one definitive answer to '{query}'. The closest matches are:\n{bullets}"
 
 
 def summarize_quantitative_answer(query: str, sources: List[Dict[str, Any]]) -> Optional[str]:
@@ -1084,8 +1085,8 @@ def ollama_summary(
             "stream": False,
             "options": {
                 "temperature": 0.0,
-                "num_ctx": 2048,
-                "num_predict": 160,
+                "num_ctx": 4096,
+                "num_predict": 400,
                 "top_k": 20,
                 "top_p": 0.9,
             },
@@ -1137,6 +1138,7 @@ async def _embed_query(
     embedding_model: str,
     ollama_url: str,
     min_similarity: float,
+    embedding_rescue_count: int = 1,
 ):
     query = query.strip()
     if not query:
@@ -1154,7 +1156,7 @@ async def _embed_query(
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Embedding query failed: {exc}") from exc
 
-    ranking = ranked_matches(indexed, query_vectors[0], query, min_similarity)
+    ranking = ranked_matches(indexed, query_vectors[0], query, min_similarity, embedding_rescue_count)
     return query, indexed, query_vectors[0], ranking
 
 
@@ -1387,8 +1389,19 @@ def create_requirements_router(
 
     @router.post("/summary")
     async def summary(body: SummaryBody):
+        # A wider embedding-rescue count than /search's default (1): /summary synthesizes
+        # across several sources rather than picking one answer, so it can afford - and
+        # benefits from - a wider net for phrasing-sensitive queries (verified live: the
+        # requirement stating the actual value ranked #2 by embedding, not #1, for one
+        # real query phrasing, and needed rescuing regardless).
         query, indexed, query_vector, ranking = await _embed_query(
-            store, indexer, body.query, body.embedding_model, body.ollama_url, body.min_similarity
+            store,
+            indexer,
+            body.query,
+            body.embedding_model,
+            body.ollama_url,
+            body.min_similarity,
+            embedding_rescue_count=3,
         )
 
         if is_broad_summary_query(query):
@@ -1416,7 +1429,7 @@ def create_requirements_router(
         )
         degraded_reason = None
         if enable_llm_summary:
-            summary_timeout = int(os.environ.get("SUMMARY_TIMEOUT", "12"))
+            summary_timeout = int(os.environ.get("SUMMARY_TIMEOUT", "90"))
             fewshot_prefix = await fetch_fewshot_examples()
             reference_context = await build_reference_context(body.embedding_model, body.ollama_url, query_vector)
             try:
