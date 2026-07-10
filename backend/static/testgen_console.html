@@ -188,17 +188,20 @@ function testCaseBodyHtml(tc, category) {
     <h3 style="font-size:12px;">Acceptance criteria</h3><ul>${tc.acceptance_criteria.map(a => `<li>${esc(a)}</li>`).join('')}</ul>
     <div class="muted">verification: ${esc(tc.verification_method)}</div>
     ${tc.assumptions && tc.assumptions.length ? '<h3 style="font-size:12px;">Assumptions</h3><ul>' + tc.assumptions.map(a => `<li>${esc(a.text)}: <b>${esc(a.value)}</b> (${esc(a.confidence)}) &mdash; ${esc(a.rationale)} &mdash; <a class="link" onclick='confirmAssumptionAsSupportingInfo(${JSON.stringify(a.text)}, ${JSON.stringify(a.value)}, ${JSON.stringify(reqId)})'>save to supporting info</a></li>`).join('') + '</ul>' : ''}
+    ${tc.open_gaps && tc.open_gaps.length ? '<h3 style="font-size:12px;color:#f0c060;">Open gaps (flagged - generated anyway)</h3>' + tc.open_gaps.map(gapCardHtml).join('') : ''}
   `;
 }
 
 function renderResult(result, container) {
   if (result.status === 'generated') {
     const tc = result.test_case;
+    const gapNote = tc.open_gaps && tc.open_gaps.length ? ` <span class="badge needs_input">${tc.open_gaps.length} open gap${tc.open_gaps.length > 1 ? 's' : ''}</span>` : '';
     container.innerHTML = `
       <div class="card">
-        <span class="badge generated">generated</span>
+        <span class="badge generated">generated</span>${gapNote}
         ${testCaseBodyHtml(tc, result.category)}
       </div>`;
+    wireGapForms(container);
   } else {
     container.innerHTML = `
       <div class="card">
@@ -310,6 +313,7 @@ async function loadTestCases() {
       </summary>
       ${testCaseBodyHtml(tc, tc.category)}
     </details>`).join('');
+  wireGapForms(list);
 }
 
 document.getElementById('analyzeBtn').addEventListener('click', async () => {

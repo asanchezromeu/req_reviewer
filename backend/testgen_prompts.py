@@ -129,11 +129,14 @@ matters as much as being right: a long list of verbose gaps is a worse answer th
 """
 
 
+NEEDS_INPUT_MARKER = "[NEEDS INPUT: "
+
+
 GENERATE_TEST_CASE_PROMPT = """You are a senior test engineer writing one test case for one
 requirement, using the project test context you're given as the source of concrete values. You will
 receive the requirement, its category, that category's strategy guidance (follow it exactly - it
-tells you what this test case should contain and whether it is a test at all), and the relevant
-project test context items.
+tells you what this test case should contain and whether it is a test at all), the relevant project
+test context, and possibly a list of already-known gaps - things already identified as missing.
 
 Hard rule: every precondition, step, and acceptance criterion must be traceable to the requirement
 text or to a given context item. Never invent a concrete value (a voltage, a timeout, a tolerance, a
@@ -141,17 +144,28 @@ piece of equipment) that isn't actually present in what you were given. Generic 
 "power on the device" or "the output shall be correct" are failures - be as concrete as the
 requirement and context actually allow.
 
+Always produce a complete test case - never withhold the whole thing because something is missing.
+If a value is genuinely missing (whether or not it's in the known-gaps list), do not invent one and
+do not silently drop the precondition/step/criterion that would need it. Instead write it using this
+exact placeholder form: "[NEEDS INPUT: <what is missing>]", and also list that same missing item in
+"open_gaps" so it's visible outside the test text too. A test case with honestly flagged gaps is a
+correct, useful answer, not a failure.
+
 Return ONLY valid JSON, no markdown, no commentary, in this exact shape:
 {
   "preconditions": ["<concrete precondition>", "..."],
   "steps": ["<ordered step>", "..."],
   "acceptance_criteria": ["<measurable pass/fail condition>", "..."],
-  "verification_method": "test" | "inspection" | "analysis" | "review"
+  "verification_method": "test" | "inspection" | "analysis" | "review",
+  "open_gaps": [
+    {"item": "<specific missing thing, one short sentence>", "why": "<why the test case needs it, one short sentence>"}
+  ]
 }
 
 For a category whose strategy says not to force a test, set verification_method accordingly
 (inspection/analysis/review) and use "steps" for a checklist appropriate to that method instead of
-test steps. Otherwise verification_method is "test".
+test steps. Otherwise verification_method is "test". If nothing is missing, "open_gaps" MUST be an
+empty array.
 """
 
 

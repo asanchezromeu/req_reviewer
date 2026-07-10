@@ -12,8 +12,10 @@ from typing import Any, Dict, List
 
 try:
     from .deterministic_review import WEAK_WORDS, _has_measure
+    from .testgen_prompts import NEEDS_INPUT_MARKER
 except ImportError:
     from deterministic_review import WEAK_WORDS, _has_measure
+    from testgen_prompts import NEEDS_INPUT_MARKER
 
 
 BANNED_PHRASES = (
@@ -28,6 +30,8 @@ _DIGIT_RE = re.compile(r"\d+(?:\.\d+)?")
 def _generic_phrase_violations(lines: List[str], field_name: str) -> List[Dict[str, str]]:
     violations = []
     for line in lines:
+        if NEEDS_INPUT_MARKER in line:
+            continue  # already honestly self-flagged - don't also trip a generic-wording violation
         lower = line.lower()
         banned_hit = next((phrase for phrase in BANNED_PHRASES if phrase in lower), None)
         if banned_hit:
@@ -59,7 +63,7 @@ def _missing_measure_violations(criteria: List[str], require_quantity: bool) -> 
             "doesn't state one.",
         }
         for line in criteria
-        if not _has_measure(line)
+        if NEEDS_INPUT_MARKER not in line and not _has_measure(line)
     ]
 
 
@@ -82,6 +86,8 @@ def _untraceable_value_violations(
 ) -> List[Dict[str, str]]:
     violations = []
     for line in lines:
+        if NEEDS_INPUT_MARKER in line:
+            continue  # already honestly self-flagged - don't also trip an untraceable-value violation
         for match in _NUMBER_RE.finditer(line):
             digit_match = _DIGIT_RE.match(match.group(0))
             digits = digit_match.group(0) if digit_match else match.group(0)

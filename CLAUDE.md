@@ -154,8 +154,8 @@ python -m unittest tests.test_req_analysis -v
     `analyze_one`'s existing `fallback` marker, so a misleadingly-similar comparison caused by both
     models hitting that fallback is visible rather than hidden.
 - **Test-case generation, Phase 6 (`SPEC-ADDENDUM-A.md`), all stages A–C complete** — project test
-  context (A.2), category-aware generation with the two-verdict sufficiency gate (A.3–A.4), and the
-  resolve/regenerate loop (A.5).
+  context (A.2), category-aware generation with a two-verdict flagging pass (A.3–A.4, no longer a
+  blocking gate — see below), and the resolve/regenerate loop (A.5).
   - Confirmed decisions (previously defaulted, now settled): a test case's `requirement_ids` is a
     list (many-to-many capable — the engine does not auto-group requirements into one test case,
     but the schema supports a human doing so during review); the addendum's 7 categories are the
@@ -191,26 +191,39 @@ python -m unittest tests.test_req_analysis -v
     `/testgen/resolve` share one pipeline, `_generate_for_requirement` (`backend/server.py`): call 1
     (`CLASSIFY_AND_ASSESS_PROMPT`) combines classification and **Verdict 1** in one judgment — given
     the requirement, the known categories + their strategy text, the current project test context,
-    and any authorized assumptions for this attempt, returns `{category, sufficient, gaps}`. If
-    insufficient, each gap is persisted to `db.test_gaps` (`gap_source: "sufficiency"`) and returned
-    with a `gap_id` — no test case generated. If sufficient, call 2 (`GENERATE_TEST_CASE_PROMPT`)
-    generates `{preconditions, steps, acceptance_criteria, verification_method}` — the category's
-    strategy text itself tells the model what shape to produce (e.g. Non-testable-by-test's strategy
-    says to propose a verification method and a checklist instead of test steps), so **one
-    schema/prompt covers testable and non-testable categories with no hardcoded Python branch for
-    that case**. **Verdict 2** then runs `backend/testgen_lint.py`'s `check_anti_genericity` — a
-    *deterministic* lint pass (no third LLM call, per A.7's "this is itself testable" framing),
-    reusing `deterministic_review.py`'s `WEAK_WORDS`/`_has_measure` — that flags banned generic
-    phrasing, acceptance criteria missing a measurable quantity (only enforced when the requirement
-    or context actually establishes one — a purely functional/logging requirement can be satisfied
-    by an observable-state criterion instead), and numeric values in the output that aren't
-    traceable (by bare numeral, not exact wording) to the requirement, a context item, or a marked
-    assumption. A Verdict-2 failure persists gaps the same way as Verdict 1 (`gap_source:
-    "self_review"`) and the draft test case is discarded, not persisted. Both LLM calls degrade to
-    `needs_input` (gaps persisted) on malformed JSON, never crash. Generated test cases persist to
-    `db.test_cases` with `assumptions` populated only via an authorized fill-in (never silently);
-    batch results are a mixed `generated`/`needs_input` list per requirement — one failure never
-    blocks the rest.
+    and any authorized assumptions for this attempt, returns `{category, sufficient, gaps}`.
+    **Insufficiency no longer blocks generation** (changed from the original design after a live
+    finding: a category like Safety-related demands several simultaneous facts, and blocking on
+    every one created an endless gap loop with nothing ever persisted for the user to look at) — any
+    gaps are persisted to `db.test_gaps` (`gap_source: "sufficiency"`) and passed into call 2's
+    prompt as things not to invent a value for, but generation always proceeds. Call 2
+    (`GENERATE_TEST_CASE_PROMPT`) generates `{preconditions, steps, acceptance_criteria,
+    verification_method, open_gaps}` — the category's strategy text itself tells the model what
+    shape to produce (e.g. Non-testable-by-test's strategy says to propose a verification method and
+    a checklist instead of test steps), so **one schema/prompt covers testable and non-testable
+    categories with no hardcoded Python branch for that case**. The model is instructed to flag any
+    value it can't ground rather than invent one — write an explicit `[NEEDS INPUT: ...]` placeholder
+    (`testgen_prompts.NEEDS_INPUT_MARKER`) in the affected step/criterion and list it in its own
+    `open_gaps` (persisted with `gap_source: "generation"`). **Verdict 2** then runs
+    `backend/testgen_lint.py`'s `check_anti_genericity` — a *deterministic* lint pass (no third LLM
+    call, per A.7's "this is itself testable" framing), reusing `deterministic_review.py`'s
+    `WEAK_WORDS`/`_has_measure` — that flags banned generic phrasing, acceptance criteria missing a
+    measurable quantity (only enforced when the requirement or context actually establishes one — a
+    purely functional/logging requirement can be satisfied by an observable-state criterion instead),
+    and numeric values in the output that aren't traceable (by bare numeral, not exact wording) to
+    the requirement, a context item, or a marked assumption — skipping any line that already contains
+    `NEEDS_INPUT_MARKER`, since a self-flagged placeholder shouldn't also trip a second, redundant
+    flag. **A Verdict-2 failure no longer discards the draft** either — its violations are persisted
+    the same way (`gap_source: "self_review"`) and the test case is still persisted, flags and all.
+    All three gap sources (`sufficiency`/`generation`/`self_review`) accumulate into one
+    `TestCase.open_gaps` list embedded in the persisted test case, each entry carrying its own
+    `gap_id` so it's independently answerable/authorize-fillable/dismissable via the endpoints below
+    without a separate lookup. Only a real technical failure (the LLM call errors, or `extract_json`
+    can't parse *any* JSON from either call) still returns `status: "needs_input"` with no test case
+    — that's now a rare, genuine "the model gave us nothing usable" signal, not a "the project lacks
+    detail" one. Generated test cases persist to `db.test_cases` with `assumptions` populated only
+    via an authorized fill-in (never silently); batch results are a mixed `generated`/`needs_input`
+    list per requirement — one failure never blocks the rest.
   - `GET /testgen/testcases` (optional `?requirement_id=` filter).
   - `POST /testgen/resolve` (`{gap_id, resolution_type: "answer"|"authorize_fill", answer?}`) closes
     the loop A.5 calls for. `"answer"` appends a new `user_provided` context item from the answer

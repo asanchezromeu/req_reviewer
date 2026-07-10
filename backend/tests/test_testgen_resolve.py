@@ -15,12 +15,18 @@ try:
         CLASSIFY_AND_ASSESS_PROMPT,
         GENERATE_TEST_CASE_PROMPT,
         AUTHORIZE_FILL_PROMPT,
+        NEEDS_INPUT_MARKER,
     )
 except ImportError:
     import server
     from retrieval import Requirement, RequirementStore
     from testgen_lint import check_anti_genericity
-    from testgen_prompts import CLASSIFY_AND_ASSESS_PROMPT, GENERATE_TEST_CASE_PROMPT, AUTHORIZE_FILL_PROMPT
+    from testgen_prompts import (
+        CLASSIFY_AND_ASSESS_PROMPT,
+        GENERATE_TEST_CASE_PROMPT,
+        AUTHORIZE_FILL_PROMPT,
+        NEEDS_INPUT_MARKER,
+    )
 
 
 def run(coro):
@@ -135,6 +141,18 @@ class AntiGenericityLintTests(unittest.TestCase):
         violations = check_anti_genericity(generated, "The zone controller shall respond within 200 ms.", [], [])
         self.assertEqual(violations, [])
 
+    def test_self_flagged_placeholder_line_not_double_flagged(self):
+        # A line the model already honestly marked as missing shouldn't also trip the
+        # generic-wording, missing-measure, or untraceable-value lint - that would just be a
+        # second, differently-worded flag for the exact same thing.
+        generated = {
+            "preconditions": [f"Bench at {NEEDS_INPUT_MARKER}supply voltage]."],
+            "acceptance_criteria": [f"Response time <= {NEEDS_INPUT_MARKER}response time threshold]."],
+            "verification_method": "test",
+        }
+        violations = check_anti_genericity(generated, "The system shall respond within 200 ms.", [], [])
+        self.assertEqual(violations, [])
+
 
 class TestgenResolveTests(unittest.TestCase):
     def setUp(self):
@@ -170,7 +188,9 @@ class TestgenResolveTests(unittest.TestCase):
 
     def test_verdict_2_catches_invented_value_verdict_1_missed(self):
         # Regression test for the live-test finding: a vague requirement was judged
-        # sufficient, and generation invented an unsupported "200 ms" criterion.
+        # sufficient, and generation invented an unsupported "200 ms" criterion. Verdict 2
+        # no longer discards the test case for this - it flags the untraceable value and
+        # keeps the (otherwise usable) generated content.
         self._seed_requirement("REQ-002", "The system shall be fast.")
 
         async def fake(provider, model, sys_msg, user, ollama_url=None):
@@ -189,9 +209,42 @@ class TestgenResolveTests(unittest.TestCase):
             response = run(server.generate_test_cases(server.GenerateBody()))
 
         result = response["results"][0]
-        self.assertEqual(result["status"], "needs_input")
-        self.assertTrue(any(g["gap_source"] == "self_review" for g in result["gaps"]))
-        self.assertEqual(run(server.list_test_cases()), [])
+        self.assertEqual(result["status"], "generated")
+        self.assertTrue(any(g["gap_source"] == "self_review" for g in result["test_case"].open_gaps))
+        self.assertEqual(len(run(server.list_test_cases())), 1)
+
+    def test_generation_self_reported_open_gaps_are_persisted_and_attached(self):
+        # The generate call itself can now flag something it noticed, distinct from what
+        # Verdict 1 already caught - persisted with gap_source "generation".
+        self._seed_requirement("REQ-002", "The system shall be fast.")
+
+        async def fake(provider, model, sys_msg, user, ollama_url=None):
+            if sys_msg == CLASSIFY_AND_ASSESS_PROMPT:
+                return json.dumps({"category": "Performance / timing", "sufficient": True, "gaps": []})
+            return json.dumps(
+                {
+                    "preconditions": ["Nominal operating conditions."],
+                    "steps": ["Trigger the operation.", "Measure response time."],
+                    "acceptance_criteria": ["Response time <= [NEEDS INPUT: response time threshold]."],
+                    "verification_method": "test",
+                    "open_gaps": [{"item": "response time threshold", "why": "not stated anywhere"}],
+                }
+            )
+
+        with patch.object(server, "llm_complete", fake):
+            response = run(server.generate_test_cases(server.GenerateBody()))
+
+        result = response["results"][0]
+        self.assertEqual(result["status"], "generated")
+        open_gaps = result["test_case"].open_gaps
+        self.assertEqual(len(open_gaps), 1)
+        self.assertEqual(open_gaps[0]["gap_source"], "generation")
+        self.assertTrue(open_gaps[0]["gap_id"])
+
+        # Also persisted to the project-wide worklist, resolvable/dismissable like any other gap.
+        gaps = run(server.list_gaps(status="open"))
+        self.assertEqual(len(gaps), 1)
+        self.assertEqual(gaps[0]["gap_source"], "generation")
 
     def test_traceable_generation_persists_with_empty_assumptions(self):
         self._seed_requirement("REQ-001", "The zone controller shall respond within 200 ms.")
@@ -255,7 +308,7 @@ class TestgenResolveTests(unittest.TestCase):
 
         with patch.object(server, "llm_complete", fake_insufficient):
             response = run(server.generate_test_cases(server.GenerateBody()))
-        gap_id = response["results"][0]["gaps"][0]["gap_id"]
+        gap_id = response["results"][0]["test_case"].open_gaps[0]["gap_id"]
 
         fake_resolve = self._fake_llm(
             assess_response={"category": "Performance / timing", "sufficient": True, "gaps": []},
@@ -290,7 +343,7 @@ class TestgenResolveTests(unittest.TestCase):
 
         with patch.object(server, "llm_complete", fake_insufficient):
             response = run(server.generate_test_cases(server.GenerateBody()))
-        gap_id = response["results"][0]["gaps"][0]["gap_id"]
+        gap_id = response["results"][0]["test_case"].open_gaps[0]["gap_id"]
 
         with self.assertRaises(HTTPException) as ctx:
             run(server.resolve_gap(server.ResolveBody(gap_id=gap_id, resolution_type="answer")))
@@ -312,7 +365,7 @@ class TestgenResolveTests(unittest.TestCase):
 
         with patch.object(server, "llm_complete", fake_insufficient):
             response = run(server.generate_test_cases(server.GenerateBody()))
-        gap_id = response["results"][0]["gaps"][0]["gap_id"]
+        gap_id = response["results"][0]["test_case"].open_gaps[0]["gap_id"]
 
         async def fake_resolve(provider, model, sys_msg, user, ollama_url=None):
             if sys_msg == AUTHORIZE_FILL_PROMPT:
@@ -353,7 +406,7 @@ class TestgenResolveTests(unittest.TestCase):
 
         with patch.object(server, "llm_complete", fake_insufficient):
             response = run(server.generate_test_cases(server.GenerateBody()))
-        gap_id = response["results"][0]["gaps"][0]["gap_id"]
+        gap_id = response["results"][0]["test_case"].open_gaps[0]["gap_id"]
 
         async def fake_malformed(provider, model, sys_msg, user, ollama_url=None):
             return "not json"
@@ -362,7 +415,10 @@ class TestgenResolveTests(unittest.TestCase):
             result = run(server.resolve_gap(server.ResolveBody(gap_id=gap_id, resolution_type="authorize_fill")))
 
         self.assertEqual(result["status"], "needs_input")
-        self.assertEqual(run(server.list_test_cases()), [])
+        # The initial generate_test_cases call above already persisted one flagged test case
+        # (insufficiency no longer blocks generation) - the authorize_fill proposal itself
+        # failing just means no *additional* test case gets created.
+        self.assertEqual(len(run(server.list_test_cases())), 1)
 
     # ---------- resolve: error paths ----------
 
@@ -379,7 +435,7 @@ class TestgenResolveTests(unittest.TestCase):
 
         with patch.object(server, "llm_complete", fake_insufficient):
             response = run(server.generate_test_cases(server.GenerateBody()))
-        gap_id = response["results"][0]["gaps"][0]["gap_id"]
+        gap_id = response["results"][0]["test_case"].open_gaps[0]["gap_id"]
 
         fake_resolve = self._fake_llm(
             assess_response={"category": "Performance / timing", "sufficient": False, "gaps": [{"item": "x", "why": "y"}]}
@@ -401,13 +457,19 @@ class TestgenResolveTests(unittest.TestCase):
 
         with patch.object(server, "llm_complete", fake_insufficient):
             response = run(server.generate_test_cases(server.GenerateBody()))
-        gap_id = response["results"][0]["gaps"][0]["gap_id"]
+        gap_id = response["results"][0]["test_case"].open_gaps[0]["gap_id"]
 
         open_gaps = run(server.list_gaps(status="open"))
         self.assertEqual(len(open_gaps), 1)
 
         fake_resolve = self._fake_llm(
-            assess_response={"category": "Performance / timing", "sufficient": False, "gaps": [{"item": "x", "why": "y"}]}
+            assess_response={"category": "Performance / timing", "sufficient": False, "gaps": [{"item": "x", "why": "y"}]},
+            generate_response={
+                "preconditions": ["p"],
+                "steps": ["s"],
+                "acceptance_criteria": [f"Response time <= {NEEDS_INPUT_MARKER}response time threshold]."],
+                "verification_method": "test",
+            },
         )
         with patch.object(server, "llm_complete", fake_resolve):
             run(server.resolve_gap(server.ResolveBody(gap_id=gap_id, resolution_type="answer", answer="150 ms")))
@@ -425,7 +487,7 @@ class TestgenResolveTests(unittest.TestCase):
 
         with patch.object(server, "llm_complete", fake_insufficient):
             response = run(server.generate_test_cases(server.GenerateBody()))
-        gap_id = response["results"][0]["gaps"][0]["gap_id"]
+        gap_id = response["results"][0]["test_case"].open_gaps[0]["gap_id"]
 
         async def fail_if_called(*args, **kwargs):
             raise AssertionError("dismiss must not call the LLM")
@@ -452,7 +514,7 @@ class TestgenResolveTests(unittest.TestCase):
 
         with patch.object(server, "llm_complete", fake_insufficient):
             response = run(server.generate_test_cases(server.GenerateBody()))
-        gap_id = response["results"][0]["gaps"][0]["gap_id"]
+        gap_id = response["results"][0]["test_case"].open_gaps[0]["gap_id"]
         run(server.dismiss_gap(gap_id))
 
         with self.assertRaises(HTTPException) as ctx:
@@ -475,7 +537,7 @@ class TestgenResolveTests(unittest.TestCase):
 
         with patch.object(server, "llm_complete", fake_insufficient):
             response = run(server.generate_test_cases(server.GenerateBody()))
-        gap_id = response["results"][0]["gaps"][0]["gap_id"]
+        gap_id = response["results"][0]["test_case"].open_gaps[0]["gap_id"]
 
         fake_resolve = self._fake_llm(
             assess_response={"category": "Performance / timing", "sufficient": True, "gaps": []},
@@ -512,7 +574,7 @@ class TestgenResolveTests(unittest.TestCase):
 
         with patch.object(server, "llm_complete", fake_insufficient):
             response = run(server.generate_test_cases(server.GenerateBody()))
-        gap_id = response["results"][0]["gaps"][0]["gap_id"]
+        gap_id = response["results"][0]["test_case"].open_gaps[0]["gap_id"]
 
         async def fake_resolve(provider, model, sys_msg, user, ollama_url=None):
             if sys_msg == AUTHORIZE_FILL_PROMPT:

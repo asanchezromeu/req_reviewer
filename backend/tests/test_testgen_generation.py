@@ -114,23 +114,35 @@ class TestgenGenerationTests(unittest.TestCase):
         persisted = run(server.list_test_cases())
         self.assertEqual(len(persisted), 1)
 
-    def test_insufficient_requirement_produces_needs_input_and_no_test_case(self):
+    def test_insufficient_requirement_still_generates_with_open_gaps(self):
+        # Regression test: insufficiency used to block generation entirely, which combined
+        # with a category needing several simultaneous facts (Safety-related) produced an
+        # endless gap loop with nothing ever persisted. Now generation always proceeds and
+        # the missing info is flagged on the test case itself instead of blocking it.
         self._seed_requirement("REQ-001", "The system shall be fast.")
         fake = self._fake_llm(
             assess_response={
                 "category": "Performance / timing",
                 "sufficient": False,
                 "gaps": [{"item": "response time threshold", "why": "no numeric value given"}],
-            }
+            },
+            generate_response={
+                "preconditions": ["Nominal operating conditions."],
+                "steps": ["Trigger the operation.", "Measure response time."],
+                "acceptance_criteria": ["Response time <= [NEEDS INPUT: response time threshold]."],
+                "verification_method": "test",
+            },
         )
 
         with patch.object(server, "llm_complete", fake):
             response = run(server.generate_test_cases(server.GenerateBody()))
 
         result = response["results"][0]
-        self.assertEqual(result["status"], "needs_input")
-        self.assertEqual(len(result["gaps"]), 1)
-        self.assertEqual(run(server.list_test_cases()), [])
+        self.assertEqual(result["status"], "generated")
+        open_gaps = result["test_case"].open_gaps
+        self.assertEqual(len(open_gaps), 1)
+        self.assertEqual(open_gaps[0]["gap_source"], "sufficiency")
+        self.assertEqual(len(run(server.list_test_cases())), 1)
 
     def test_malformed_assess_output_degrades_to_needs_input(self):
         self._seed_requirement("REQ-001", "The system shall log failures.")
@@ -211,7 +223,14 @@ class TestgenGenerationTests(unittest.TestCase):
         by_id = {r["requirement_id"]: r for r in response["results"]}
         self.assertEqual(len(by_id), 3)
         self.assertEqual(by_id["REQ-001"]["status"], "generated")
-        self.assertEqual(by_id["REQ-002"]["status"], "needs_input")
+        # REQ-002 is "insufficient" per the assess call, but that no longer blocks generation -
+        # it still gets a test case, just with the gap flagged on it (plus a self-review flag,
+        # since the shared fixture generate response invents a "200 ms" value REQ-002's own text
+        # never states).
+        self.assertEqual(by_id["REQ-002"]["status"], "generated")
+        req002_gap_sources = {g["gap_source"] for g in by_id["REQ-002"]["test_case"].open_gaps}
+        self.assertIn("sufficiency", req002_gap_sources)
+        # REQ-003's assess call itself returned unparsable JSON - a genuine failure, still needs_input.
         self.assertEqual(by_id["REQ-003"]["status"], "needs_input")
 
     def test_generate_requires_matching_requirements(self):

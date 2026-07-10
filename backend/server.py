@@ -41,6 +41,7 @@ try:
         CLASSIFY_AND_ASSESS_PROMPT,
         GENERATE_TEST_CASE_PROMPT,
         AUTHORIZE_FILL_PROMPT,
+        NEEDS_INPUT_MARKER,
     )
     from .testgen_lint import check_anti_genericity
 except ImportError:
@@ -62,6 +63,7 @@ except ImportError:
         CLASSIFY_AND_ASSESS_PROMPT,
         GENERATE_TEST_CASE_PROMPT,
         AUTHORIZE_FILL_PROMPT,
+        NEEDS_INPUT_MARKER,
     )
     from testgen_lint import check_anti_genericity
 
@@ -1219,6 +1221,7 @@ class TestCase(BaseModel):
     verification_method: str = "test"
     review_flags: List[str] = []
     assumptions: List[Dict[str, Any]] = []
+    open_gaps: List[Dict[str, Any]] = []
     context_version: Optional[int] = None
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
@@ -1319,6 +1322,9 @@ async def _generate_for_requirement(
     if assumption_listing:
         assess_user_message += f"\n\nAuthorized assumptions for this requirement:\n{assumption_listing}"
 
+    open_gaps: List[Dict[str, Any]] = []
+    gaps: List[Dict[str, Any]] = []
+
     try:
         raw = await llm_complete(provider, model, CLASSIFY_AND_ASSESS_PROMPT, assess_user_message, ollama_url)
         assessment = extract_json(raw)
@@ -1330,11 +1336,15 @@ async def _generate_for_requirement(
         gap_dicts = await _persist_gaps(req_id, [{"item": "analysis failed", "why": str(exc)}], "sufficiency")
         return {"requirement_id": req_id, "status": "needs_input", "category": None, "gaps": gap_dicts}
 
-    if not sufficient:
+    # Insufficient context no longer blocks generation - it just means there's something to
+    # flag. Persist the gaps for the project-wide worklist, then still generate: the model is
+    # told below not to invent values for them.
+    if not sufficient and gaps:
         gap_dicts = await _persist_gaps(req_id, gaps, "sufficiency")
-        return {"requirement_id": req_id, "status": "needs_input", "category": category, "gaps": gap_dicts}
+        open_gaps.extend(gap_dicts)
 
     strategy_instructions = strategies.get(category, "Use sound test-engineering judgement for this category.")
+    known_gap_listing = "\n".join(f"- {g['item']}: {g['why']}" for g in gaps)
     generate_user_message = (
         f"Requirement: [{req_id}] {req_text}\n\n"
         f"Category: {category}\n"
@@ -1344,6 +1354,11 @@ async def _generate_for_requirement(
     )
     if assumption_listing:
         generate_user_message += f"\n\nAuthorized assumptions for this requirement:\n{assumption_listing}"
+    if known_gap_listing:
+        generate_user_message += (
+            f"\n\nKnown gaps identified so far - do not invent values for these; use the "
+            f"'{NEEDS_INPUT_MARKER}...]' placeholder and list them in open_gaps instead:\n{known_gap_listing}"
+        )
 
     try:
         raw = await llm_complete(provider, model, GENERATE_TEST_CASE_PROMPT, generate_user_message, ollama_url)
@@ -1353,11 +1368,16 @@ async def _generate_for_requirement(
         gap_dicts = await _persist_gaps(req_id, [{"item": "generation failed", "why": str(exc)}], "sufficiency")
         return {"requirement_id": req_id, "status": "needs_input", "category": category, "gaps": gap_dicts}
 
+    model_reported_gaps = generated.get("open_gaps", []) or []
+    if model_reported_gaps:
+        gap_dicts = await _persist_gaps(req_id, model_reported_gaps, "generation")
+        open_gaps.extend(gap_dicts)
+
     context_items = context["items"] if context else []
     violations = check_anti_genericity(generated, req_text, context_items, extra_assumptions)
     if violations:
         gap_dicts = await _persist_gaps(req_id, violations, "self_review")
-        return {"requirement_id": req_id, "status": "needs_input", "category": category, "gaps": gap_dicts}
+        open_gaps.extend(gap_dicts)
 
     test_case = TestCase(
         requirement_ids=[req_id],
@@ -1368,6 +1388,7 @@ async def _generate_for_requirement(
         verification_method=str(generated.get("verification_method", "test")),
         review_flags=["safety"] if category == "Safety-related" else [],
         assumptions=extra_assumptions,
+        open_gaps=open_gaps,
         context_version=context_version,
     )
     await db.test_cases.insert_one(test_case.model_dump())
